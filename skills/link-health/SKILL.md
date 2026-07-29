@@ -111,7 +111,9 @@ The link should resolve to valid documentation.
 ## Additional Context
 
 Category: $category
-Detected by: OpenClaw Link Health Scanner (cron: link-health-scanner)"
+Detected by: [Rossoctl Automation Link Health Scanner](https://github.com/rossoctl/automation/blob/main/skills/link-health/SKILL.md) (cron: link-health-scanner)"
+
+Note that [Rossoctl Automation](https://github.com/rossoctl/automation) will auto-close this issue if fixed, but will not create a PR with fixes.
 ```
 
 Where `$category_label` is:
