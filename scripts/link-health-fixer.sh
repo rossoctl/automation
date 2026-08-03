@@ -11,10 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/program-lib.sh"
 
 # --- Configuration ---
-REPOS_DIR="${REPOS_DIR:-$HOME/kagenti}"
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
-FORK_OWNER="clawgenti"
-ORG="kagenti"
 FIX_DATE=$(date +%Y-%m-%d)
 SCAN_DATE=$(date +%Y-%m-%d)
 
@@ -35,10 +32,18 @@ while [[ $# -gt 0 ]]; do
     --live) DRY_RUN=false; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
+    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
+    --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
+
+# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
+# MAIN_REPO, REPOS_DIR, REMAP. Reads use canonical $ORG/<name>; fork-PR write
+# paths derive from $ORG/$FORK_OWNER.
+load_org_profile
 
 # --- Workspace setup ---
 setup_workspace "link-fixer"
@@ -79,7 +84,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   esac
   SEEN_CANON="$SEEN_CANON $canon"
 
-  full_repo="rossoctl/$canon"
+  full_repo="$ORG/$canon"
 
   issues_json=$(gh issue list --repo "$full_repo" \
     --search "Broken link in:title" \
@@ -383,8 +388,10 @@ while IFS= read -r item; do
 
   echo "    FIX: $target_path -> $new_path"
 
-  # Determine which repo contains the source file that needs editing
-  source_repo_name="${repo#"$ORG/"}"
+  # Determine which repo contains the source file that needs editing.
+  # $repo is always "owner/name"; strip any owner so the bare repo name is
+  # correct regardless of which org owns it (do not couple to $ORG).
+  source_repo_name="${repo##*/}"
 
   jq -nc \
     --arg number "$number" \
