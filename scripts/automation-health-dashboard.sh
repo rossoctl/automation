@@ -13,23 +13,26 @@ set -euo pipefail
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/program-lib.sh"
 
 # --- CLI args ---
 DRY_RUN=true
-ORG="kagenti"
 VERBOSE=false
 SHOW_HELP=false
-FORK_OWNER="${FORK_OWNER:-clawgenti}"
-KAGENTI_DIR="${KAGENTI_DIR:-}"
+MAIN_REPO_DIR="${MAIN_REPO_DIR:-${KAGENTI_DIR:-}}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --live) DRY_RUN=false; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
-    --kagenti-dir) KAGENTI_DIR="$2"; shift 2 ;;
-    --org) ORG="$2"; shift 2 ;;
-    --fork-owner) FORK_OWNER="$2"; shift 2 ;;
+    --main-repo-dir) MAIN_REPO_DIR="$2"; shift 2 ;;
+    --kagenti-dir)   # deprecated alias, remove after one release
+      echo "WARN: --kagenti-dir is deprecated; use --main-repo-dir" >&2
+      MAIN_REPO_DIR="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
+    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -49,20 +52,26 @@ Usage:
 Options:
   --dry-run           Generate and preview dashboard (default)
   --live              Commit and push to fork, create/update PR
-  --reports-dir DIR   Base reports directory (default: $REPORTS_DIR or ./reports)
-  --kagenti-dir DIR   Path to kagenti repo clone (default: $KAGENTI_DIR)
-  --org NAME          GitHub org (default: kagenti)
-  --fork-owner NAME   Fork owner for PR workflow (default: clawgenti)
-  --verbose           Print diagnostic output
-  --help, -h          Show this help
+  --reports-dir DIR    Base reports directory (default: $REPORTS_DIR or ./reports)
+  --main-repo-dir DIR  Path to the org main repo clone (default: $MAIN_REPO_DIR)
+  --kagenti-dir DIR    Deprecated alias for --main-repo-dir
+  --org NAME           GitHub org (default: from profile, config/org.env)
+  --fork-owner NAME    Fork owner for PR workflow (default: from profile)
+  --verbose            Print diagnostic output
+  --help, -h           Show this help
 
 Environment:
-  REPORTS_DIR   Base directory containing link-scan/ and dep-bump/ subdirs
-  KAGENTI_DIR   Path to the org's main repo clone (for live mode git operations)
-  FORK_OWNER    Fork owner for cross-fork PRs
+  REPORTS_DIR    Base directory containing link-scan/ and dep-bump/ subdirs
+  MAIN_REPO_DIR  Path to the org's main repo clone (live mode git ops)
+  FORK_OWNER     Fork owner for cross-fork PRs
 HELP
   exit 0
 fi
+
+# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
+# MAIN_REPO, REPOS_DIR, REMAP. The dashboard-report PR targets $MAIN_REPO via
+# $FORK_OWNER.
+load_org_profile
 
 # --- Validate inputs ---
 if [ -z "${REPORTS_DIR:-}" ]; then
@@ -435,26 +444,26 @@ if [ "$DRY_RUN" = true ]; then
   echo "---"
   echo "[DRY RUN] Would push docs/automation-health.md to fork and create/update PR"
 else
-  if [ -z "$KAGENTI_DIR" ]; then
-    echo "ERROR: KAGENTI_DIR is not set (required for live mode)."
-    echo "Export it to the path of the kagenti/kagenti repo clone:"
-    echo "  export KAGENTI_DIR=~/kagenti/kagenti"
+  if [ -z "$MAIN_REPO_DIR" ]; then
+    echo "ERROR: MAIN_REPO_DIR is not set (required for live mode)."
+    echo "Export it to the path of the $MAIN_REPO repo clone:"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/${MAIN_REPO##*/}"
     exit 1
   fi
 
-  if [ ! -d "$KAGENTI_DIR/.git" ]; then
-    echo "ERROR: $KAGENTI_DIR does not appear to be a git repository."
+  if [ ! -d "$MAIN_REPO_DIR/.git" ]; then
+    echo "ERROR: $MAIN_REPO_DIR does not appear to be a git repository."
     exit 1
   fi
 
   FORK_REMOTE="$FORK_OWNER"
   DASHBOARD_BRANCH="automation/health-dashboard"
 
-  cd "$KAGENTI_DIR"
+  cd "$MAIN_REPO_DIR"
 
   # Ensure fork remote exists
   if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/$ORG.git"
+    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${MAIN_REPO##*/}.git"
   fi
 
   # Fetch fork's branch if it exists, otherwise create from main
@@ -473,7 +482,7 @@ else
   git push "$FORK_REMOTE" "$DASHBOARD_BRANCH" 2>/dev/null || echo "WARN: Failed to push dashboard to fork"
 
   # Create or update standing cross-fork PR
-  existing_pr=$(gh api "repos/$ORG/$ORG/pulls?head=$FORK_OWNER:$DASHBOARD_BRANCH&state=open" \
+  existing_pr=$(gh api "repos/$MAIN_REPO/pulls?head=$FORK_OWNER:$DASHBOARD_BRANCH&state=open" \
     --jq '.[0].number' 2>/dev/null || echo "")
 
   pr_body="## Summary
@@ -489,15 +498,15 @@ Auto-updated by Kagenti Automation Health Dashboard. This PR is continuously upd
 
 ## Related issue(s)
 
-- kagenti/kagenti#1260"
+- $MAIN_REPO#1260"
 
   if [ -z "$existing_pr" ] || [ "$existing_pr" = "null" ]; then
-    gh pr create --repo "$ORG/$ORG" \
+    gh pr create --repo "$MAIN_REPO" \
       --head "$FORK_OWNER:$DASHBOARD_BRANCH" --base main \
       --title "docs: Automation health dashboard (auto-updated)" \
       --body "$pr_body" 2>/dev/null || echo "WARN: Failed to create dashboard PR"
   else
-    gh pr edit "$existing_pr" --repo "$ORG/$ORG" --body "$pr_body" 2>/dev/null || true
+    gh pr edit "$existing_pr" --repo "$MAIN_REPO" --body "$pr_body" 2>/dev/null || true
   fi
 
   echo "Dashboard committed and pushed"

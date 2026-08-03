@@ -25,16 +25,32 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
+    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
+    --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
+# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
+# MAIN_REPO, REPOS_DIR, REMAP. The dashboard-report PR targets $MAIN_REPO via
+# $FORK_OWNER; issue reads use canonical $ORG/<name>.
+load_org_profile
+
 # --- Configuration ---
-REPOS_DIR="${REPOS_DIR:-$HOME/kagenti}"
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
-KAGENTI_REPO="$REPOS_DIR/kagenti"
+
+# Main repo clone dir: canonical name of the org's main repo under REPOS_DIR.
+MAIN_REPO_NAME="${MAIN_REPO##*/}"
+MAIN_REPO_DIR="$REPOS_DIR/$MAIN_REPO_NAME"
+# On a host whose clone dir is still the pre-rename name, fall back and warn
+# (REMAP does not rewrite REPOS_DIR paths; see #37).
+if [ ! -d "$MAIN_REPO_DIR/.git" ] && [ -d "$REPOS_DIR/kagenti/.git" ]; then
+  echo "WARN: $MAIN_REPO_DIR missing; using transitional $REPOS_DIR/kagenti (see #37)" >&2
+  MAIN_REPO_DIR="$REPOS_DIR/kagenti"
+fi
+
 FORK_REMOTE="clawgenti-kagenti-fork"
-FORK_OWNER="clawgenti"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
@@ -429,11 +445,11 @@ if [ "$DRY_RUN" = true ]; then
   echo "[DRY RUN] Dashboard preview:"
   cat "$TMPDIR/link-health.md"
 else
-  cd "$KAGENTI_REPO"
+  cd "$MAIN_REPO_DIR"
 
   # Ensure fork remote exists
   if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/kagenti.git"
+    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${MAIN_REPO_NAME}.git"
   fi
 
   # Fetch fork's branch if it exists, otherwise create from main
@@ -452,7 +468,7 @@ else
   git push "$FORK_REMOTE" link-health/reports 2>/dev/null || echo "WARN: Failed to push dashboard to fork"
 
   # Create or update standing cross-fork PR
-  existing_pr=$(gh api "repos/kagenti/kagenti/pulls?head=$FORK_OWNER:link-health/reports&state=open" \
+  existing_pr=$(gh api "repos/$MAIN_REPO/pulls?head=$FORK_OWNER:link-health/reports&state=open" \
     --jq '.[0].number' 2>/dev/null || echo "")
 
   pr_body="## Summary
@@ -469,15 +485,15 @@ Auto-updated by Kagenti Link Health Scanner. This PR is continuously updated wit
 
 ## Related issue(s)
 
-- kagenti/kagenti#1178"
+- $MAIN_REPO#1178"
 
   if [ -z "$existing_pr" ] || [ "$existing_pr" = "null" ]; then
-    gh pr create --repo kagenti/kagenti \
+    gh pr create --repo "$MAIN_REPO" \
       --head "$FORK_OWNER:link-health/reports" --base main \
       --title "docs: Link health report (auto-updated)" \
       --body "$pr_body" 2>/dev/null || echo "WARN: Failed to create dashboard PR"
   else
-    gh pr edit "$existing_pr" --repo kagenti/kagenti --body "$pr_body" 2>/dev/null || true
+    gh pr edit "$existing_pr" --repo "$MAIN_REPO" --body "$pr_body" 2>/dev/null || true
   fi
 fi
 
@@ -488,7 +504,7 @@ if [ "$NEW_LINKS" -gt "$ESCALATION_THRESHOLD" ]; then
   echo ""
   echo "ALERT: Link health scan found $NEW_LINKS new broken links (threshold: $ESCALATION_THRESHOLD)."
   echo "This may indicate a bulk documentation change or a widespread external service outage."
-  echo "Review issues at https://github.com/kagenti/kagenti/issues?q=label:broken-link"
+  echo "Review issues at https://github.com/$MAIN_REPO/issues?q=label:broken-link"
 fi
 
 # --- Summary ---
