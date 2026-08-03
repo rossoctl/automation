@@ -90,6 +90,10 @@ USAGE
   exit 0
 fi
 
+# Resolve org identity (env > profile > default) before reading the allowlist;
+# get_core_repos() prepends $ORG and fails loud if it is unset.
+load_org_profile
+
 # --- Workspace and reports setup ---
 setup_workspace "pr-review-impact"
 WORK_DIR="$PROGRAM_TMPDIR"

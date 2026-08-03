@@ -11,29 +11,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/program-lib.sh"
 
-# --- Configuration ---
-BOT_USER="clawgenti"
-
-# Repo coverage comes from the shared allowlist (config/core-repos.txt) via
-# get_core_repos(). Build the array with a portable while-read loop (mapfile is
-# bash 4+, unavailable on macOS's bash 3.2). Fail loud rather than silently
-# scanning an empty set.
-REPOS=()
-while IFS= read -r repo_line; do
-  [ -n "$repo_line" ] && REPOS+=("$repo_line")
-done < <(get_core_repos)
-
-if [ "${#REPOS[@]}" -eq 0 ]; then
-  echo "ERROR: core repos allowlist is empty or could not be loaded" >&2
-  exit 1
-fi
-
-LABEL="ready-for-ai-review"
-REVIEW_MARKER="<!-- reviewed:"
-STALE_THRESHOLD_MIN=30
-TTL_DAYS=30
-MAX_HISTORY_ROWS=500
-
 # --- CLI args ---
 VERBOSE=false
 DRY_RUN=false
@@ -49,6 +26,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Short-circuit --help before loading a profile or reading the allowlist, so
+# usage works even in a checkout with a missing/malformed org profile.
 if [ "$SHOW_HELP" = true ]; then
   cat << 'USAGE'
 pr-review-scanner -- Discover PRs needing AI review
@@ -76,6 +55,33 @@ PREREQUISITES:
 USAGE
   exit 0
 fi
+
+# Resolve org identity (env > profile > default) before reading the allowlist;
+# get_core_repos() prepends $ORG and fails loud if it is unset.
+load_org_profile
+
+# --- Configuration ---
+BOT_USER="clawgenti"
+
+# Repo coverage comes from the shared allowlist (config/core-repos.txt) via
+# get_core_repos(). Build the array with a portable while-read loop (mapfile is
+# bash 4+, unavailable on macOS's bash 3.2). Fail loud rather than silently
+# scanning an empty set.
+REPOS=()
+while IFS= read -r repo_line; do
+  [ -n "$repo_line" ] && REPOS+=("$repo_line")
+done < <(get_core_repos)
+
+if [ "${#REPOS[@]}" -eq 0 ]; then
+  echo "ERROR: core repos allowlist is empty or could not be loaded" >&2
+  exit 1
+fi
+
+LABEL="ready-for-ai-review"
+REVIEW_MARKER="<!-- reviewed:"
+STALE_THRESHOLD_MIN=30
+TTL_DAYS=30
+MAX_HISTORY_ROWS=500
 
 # --- Workspace and reports setup ---
 setup_workspace "pr-review-scanner"
