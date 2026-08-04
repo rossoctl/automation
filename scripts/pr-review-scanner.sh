@@ -21,6 +21,8 @@ while [[ $# -gt 0 ]]; do
     --verbose) VERBOSE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -39,6 +41,8 @@ OPTIONS:
   --verbose           Print diagnostic output to stderr
   --dry-run           Query GitHub but do not write reports (stdout output still produced)
   --reports-dir DIR   Where to write reports (default: $REPORTS_DIR or ./reports/pr-review)
+  --profile NAME      Org profile to load (config/org.<name>.env; default org.env)
+  --org NAME          GitHub org (default: from profile, config/org.env)
   --help, -h          Show this help
 
 OUTPUT:

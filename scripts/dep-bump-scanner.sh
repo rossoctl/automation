@@ -27,6 +27,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
     --org) ORG_FLAG="$2"; shift 2 ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -43,6 +44,7 @@ USAGE:
 OPTIONS:
   --dry-run         Scan and report only; do not create/close issues
   --issue-limit N   Create at most N issues per run (0 = unlimited)
+  --profile NAME    Org profile to load (config/org.<name>.env; default org.env)
   --org NAME        GitHub org to scan (default: from profile, config/org.env)
   --help, -h        Show this help
 

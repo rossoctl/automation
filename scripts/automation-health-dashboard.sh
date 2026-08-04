@@ -31,6 +31,7 @@ while [[ $# -gt 0 ]]; do
     --kagenti-dir)   # deprecated alias, remove after one release
       echo "WARN: --kagenti-dir is deprecated; use --main-repo-dir" >&2
       MAIN_REPO_DIR="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
     --org) ORG_FLAG="$2"; shift 2 ;;
     --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
@@ -56,6 +57,7 @@ Options:
   --main-repo-dir DIR  Path to the report-target repo clone, overriding the
                        REPOS_DIR-derived default (default: $MAIN_REPO_DIR)
   --kagenti-dir DIR    Deprecated alias for --main-repo-dir
+  --profile NAME       Org profile to load (config/org.<name>.env; default org.env)
   --org NAME           GitHub org (default: from profile, config/org.env)
   --fork-owner NAME    Fork owner for PR workflow (default: from profile)
   --verbose            Print diagnostic output

@@ -25,6 +25,7 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
     --org) ORG_FLAG="$2"; shift 2 ;;
     --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
     --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;

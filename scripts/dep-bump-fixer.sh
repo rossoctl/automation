@@ -28,6 +28,7 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     --live) DRY_RUN=false; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
     --org) ORG_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
@@ -46,6 +47,7 @@ OPTIONS:
   --dry-run         Analyze and preview comments only (default)
   --live            Post comments on PRs and issues
   --issue-limit N   Process at most N issues (default: 5)
+  --profile NAME    Org profile to load (config/org.<name>.env; default org.env)
   --org NAME        GitHub org (default: from profile, config/org.env)
   --verbose         Print additional diagnostic output
   --help, -h        Show this help
