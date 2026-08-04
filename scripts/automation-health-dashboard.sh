@@ -69,9 +69,20 @@ HELP
 fi
 
 # Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP. The dashboard-report PR targets $MAIN_REPO via
-# $FORK_OWNER.
+# MAIN_REPO, REPOS_DIR, REMAP.
 load_org_profile
+
+# Report-PR destination. TEMPORARY: the org main repo's docs/ folder now sources
+# the docs site (rossoctl.dev), which overwrites machine-generated reports, so
+# the standing dashboard PR is redirected to docs/reports/ in the automation
+# repo. Revert to $MAIN_REPO once a permanent home is chosen
+# (rossoctl/automation#44; see rossoctl/rossoctl#2315).
+REPORT_TARGET_REPO="$ORG/automation"
+REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
+REPORT_TARGET_PATH="docs/reports/automation-health.md"
+# Clone dir for the report target: honor an explicit --main-repo-dir/MAIN_REPO_DIR
+# override, else derive from REPOS_DIR.
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
 
 # --- Validate inputs ---
 if [ -z "${REPORTS_DIR:-}" ]; then
@@ -442,28 +453,28 @@ if [ "$DRY_RUN" = true ]; then
   echo "---"
   cat "$TMPDIR/automation-health.md"
   echo "---"
-  echo "[DRY RUN] Would push docs/automation-health.md to fork and create/update PR"
+  echo "[DRY RUN] Would push $REPORT_TARGET_PATH to fork and create/update PR against $REPORT_TARGET_REPO"
 else
-  if [ -z "$MAIN_REPO_DIR" ]; then
-    echo "ERROR: MAIN_REPO_DIR is not set (required for live mode)."
-    echo "Export it to the path of the $MAIN_REPO repo clone:"
-    echo "  export MAIN_REPO_DIR=$REPOS_DIR/${MAIN_REPO##*/}"
+  if [ -z "$REPORT_TARGET_DIR" ]; then
+    echo "ERROR: report target clone dir is not set (required for live mode)."
+    echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
     exit 1
   fi
 
-  if [ ! -d "$MAIN_REPO_DIR/.git" ]; then
-    echo "ERROR: $MAIN_REPO_DIR does not appear to be a git repository."
+  if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
+    echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
     exit 1
   fi
 
   FORK_REMOTE="$FORK_OWNER"
   DASHBOARD_BRANCH="automation/health-dashboard"
 
-  cd "$MAIN_REPO_DIR"
+  cd "$REPORT_TARGET_DIR"
 
   # Ensure fork remote exists
   if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${MAIN_REPO##*/}.git"
+    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
   fi
 
   # Fetch fork's branch if it exists, otherwise create from main
@@ -475,14 +486,14 @@ else
       || git checkout -B "$DASHBOARD_BRANCH"
   fi
 
-  mkdir -p docs
-  cp "$TMPDIR/automation-health.md" docs/automation-health.md
-  git add docs/automation-health.md
+  mkdir -p "$(dirname "$REPORT_TARGET_PATH")"
+  cp "$TMPDIR/automation-health.md" "$REPORT_TARGET_PATH"
+  git add "$REPORT_TARGET_PATH"
   git commit -s -m "docs: Update automation health dashboard ($SCAN_TIME_ET)" 2>/dev/null || echo "No changes to commit"
   git push "$FORK_REMOTE" "$DASHBOARD_BRANCH" 2>/dev/null || echo "WARN: Failed to push dashboard to fork"
 
   # Create or update standing cross-fork PR
-  existing_pr=$(gh api "repos/$MAIN_REPO/pulls?head=$FORK_OWNER:$DASHBOARD_BRANCH&state=open" \
+  existing_pr=$(gh api "repos/$REPORT_TARGET_REPO/pulls?head=$FORK_OWNER:$DASHBOARD_BRANCH&state=open" \
     --jq '.[0].number' 2>/dev/null || echo "")
 
   pr_body="## Summary
@@ -501,12 +512,12 @@ Auto-updated by Kagenti Automation Health Dashboard. This PR is continuously upd
 - $MAIN_REPO#1260"
 
   if [ -z "$existing_pr" ] || [ "$existing_pr" = "null" ]; then
-    gh pr create --repo "$MAIN_REPO" \
+    gh pr create --repo "$REPORT_TARGET_REPO" \
       --head "$FORK_OWNER:$DASHBOARD_BRANCH" --base main \
       --title "docs: Automation health dashboard (auto-updated)" \
       --body "$pr_body" 2>/dev/null || echo "WARN: Failed to create dashboard PR"
   else
-    gh pr edit "$existing_pr" --repo "$MAIN_REPO" --body "$pr_body" 2>/dev/null || true
+    gh pr edit "$existing_pr" --repo "$REPORT_TARGET_REPO" --body "$pr_body" 2>/dev/null || true
   fi
 
   echo "Dashboard committed and pushed"

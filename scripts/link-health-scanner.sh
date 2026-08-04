@@ -40,15 +40,17 @@ load_org_profile
 # --- Configuration ---
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
 
-# Main repo clone dir: canonical name of the org's main repo under REPOS_DIR.
-MAIN_REPO_NAME="${MAIN_REPO##*/}"
-MAIN_REPO_DIR="$REPOS_DIR/$MAIN_REPO_NAME"
-# On a host whose clone dir is still the pre-rename name, fall back and warn
-# (REMAP does not rewrite REPOS_DIR paths; see #37).
-if [ ! -d "$MAIN_REPO_DIR/.git" ] && [ -d "$REPOS_DIR/kagenti/.git" ]; then
-  echo "WARN: $MAIN_REPO_DIR missing; using transitional $REPOS_DIR/kagenti (see #37)" >&2
-  MAIN_REPO_DIR="$REPOS_DIR/kagenti"
-fi
+# Report-PR destination. TEMPORARY: the org main repo's docs/ folder now
+# sources the docs site (rossoctl.dev), which overwrites machine-generated
+# reports, so the standing report PR is redirected to docs/reports/ in the
+# automation repo. Revert to $MAIN_REPO once a permanent home is chosen
+# (rossoctl/automation#44; see rossoctl/rossoctl#2315).
+REPORT_TARGET_REPO="$ORG/automation"
+REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
+REPORT_TARGET_PATH="docs/reports/link-health.md"
+
+# Clone dir for the report target under REPOS_DIR.
+REPORT_TARGET_DIR="$REPOS_DIR/$REPORT_TARGET_NAME"
 
 FORK_REMOTE="clawgenti-kagenti-fork"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
@@ -441,15 +443,15 @@ DASHBOARD_EOF
 
 # Commit and push dashboard
 if [ "$DRY_RUN" = true ]; then
-  echo "[DRY RUN] Would push docs/link-health.md to fork and create/update cross-fork PR"
+  echo "[DRY RUN] Would push $REPORT_TARGET_PATH to fork and create/update cross-fork PR against $REPORT_TARGET_REPO"
   echo "[DRY RUN] Dashboard preview:"
   cat "$TMPDIR/link-health.md"
 else
-  cd "$MAIN_REPO_DIR"
+  cd "$REPORT_TARGET_DIR"
 
   # Ensure fork remote exists
   if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${MAIN_REPO_NAME}.git"
+    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
   fi
 
   # Fetch fork's branch if it exists, otherwise create from main
@@ -461,14 +463,14 @@ else
       || git checkout -B link-health/reports
   fi
 
-  mkdir -p docs
-  cp "$TMPDIR/link-health.md" docs/link-health.md
-  git add docs/link-health.md
+  mkdir -p "$(dirname "$REPORT_TARGET_PATH")"
+  cp "$TMPDIR/link-health.md" "$REPORT_TARGET_PATH"
+  git add "$REPORT_TARGET_PATH"
   git commit -s -m "docs: Update link health dashboard ($SCAN_ID)" 2>/dev/null || echo "No changes to commit"
   git push "$FORK_REMOTE" link-health/reports 2>/dev/null || echo "WARN: Failed to push dashboard to fork"
 
   # Create or update standing cross-fork PR
-  existing_pr=$(gh api "repos/$MAIN_REPO/pulls?head=$FORK_OWNER:link-health/reports&state=open" \
+  existing_pr=$(gh api "repos/$REPORT_TARGET_REPO/pulls?head=$FORK_OWNER:link-health/reports&state=open" \
     --jq '.[0].number' 2>/dev/null || echo "")
 
   pr_body="## Summary
@@ -488,12 +490,12 @@ Auto-updated by Kagenti Link Health Scanner. This PR is continuously updated wit
 - $MAIN_REPO#1178"
 
   if [ -z "$existing_pr" ] || [ "$existing_pr" = "null" ]; then
-    gh pr create --repo "$MAIN_REPO" \
+    gh pr create --repo "$REPORT_TARGET_REPO" \
       --head "$FORK_OWNER:link-health/reports" --base main \
       --title "docs: Link health report (auto-updated)" \
       --body "$pr_body" 2>/dev/null || echo "WARN: Failed to create dashboard PR"
   else
-    gh pr edit "$existing_pr" --repo "$MAIN_REPO" --body "$pr_body" 2>/dev/null || true
+    gh pr edit "$existing_pr" --repo "$REPORT_TARGET_REPO" --body "$pr_body" 2>/dev/null || true
   fi
 fi
 
