@@ -51,8 +51,9 @@ REPORT_TARGET_REPO="$ORG/automation"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="docs/reports/link-health.md"
 
-# Clone dir for the report target under REPOS_DIR.
-REPORT_TARGET_DIR="$REPOS_DIR/$REPORT_TARGET_NAME"
+# Clone dir for the report target: honor an explicit MAIN_REPO_DIR override,
+# else derive from REPOS_DIR.
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
 
 FORK_REMOTE="clawgenti-kagenti-fork"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
@@ -449,6 +450,18 @@ if [ "$DRY_RUN" = true ]; then
   echo "[DRY RUN] Dashboard preview:"
   cat "$TMPDIR/link-health.md"
 else
+  if [ -z "$REPORT_TARGET_DIR" ]; then
+    echo "ERROR: report target clone dir is not set (required for live mode)."
+    echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
+    exit 1
+  fi
+
+  if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
+    echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
+    exit 1
+  fi
+
   cd "$REPORT_TARGET_DIR"
 
   # Ensure fork remote exists
