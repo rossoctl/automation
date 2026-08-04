@@ -76,14 +76,15 @@ fi
 # MAIN_REPO, REPOS_DIR, REMAP.
 load_org_profile
 
-# Report-PR destination. TEMPORARY: the org main repo's docs/ folder now sources
-# the docs site (rossoctl.dev), which overwrites machine-generated reports, so
-# the standing dashboard PR is redirected to docs/reports/ in the automation
-# repo. Revert to $MAIN_REPO once a permanent home is chosen
-# (rossoctl/automation#44; see rossoctl/rossoctl#2315).
+# Report-PR destination. The org main repo's docs/ folder feeds the docs site
+# (rossoctl.dev) and cannot host machine-generated reports, so the standing
+# dashboard PR lands under automation-health/ in the automation repo. A single
+# file, overwritten in place each run: trend tooling reconstructs history by
+# replaying git commit parents, so we store state (not dated snapshots) and
+# avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
 REPORT_TARGET_REPO="$ORG/automation"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
-REPORT_TARGET_PATH="docs/reports/automation-health.md"
+REPORT_TARGET_PATH="automation-health/automation-health.md"
 # Clone dir for the report target: honor an explicit --main-repo-dir/MAIN_REPO_DIR
 # override, else derive from REPOS_DIR.
 REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
