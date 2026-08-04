@@ -160,10 +160,33 @@ None of these are required for the scripts to work. They're convenience features
 
 ## Adapting for a Different Org
 
-To run against a different GitHub org:
+Org identity is no longer edited into each script. It lives in a committed
+profile file, `config/org.env`, resolved by `load_org_profile()` with
+precedence `--flag > env > profile > default`. To run against a different org:
 
-1. Clone that org's repos into `$REPOS_DIR`
-2. Edit `FORK_OWNER` in the fixer (or set it as an env var)
-3. Edit `ORG="rossoctl"` in the fixer to your org name
-4. Update DCO identity in the fixer (`GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`)
-5. Run the scanner -- it will detect broken links and create issues in the target repos
+1. Copy the default profile and edit the `PROFILE_*` values for your org:
+
+   ```bash
+   cp config/org.env config/org.myorg.env
+   # edit config/org.myorg.env:
+   #   PROFILE_ORG=myorg
+   #   PROFILE_FORK_OWNER=myfork
+   #   PROFILE_MAIN_REPO=myorg/myorg
+   #   PROFILE_REPOS_DIR=$HOME/myorg
+   #   PROFILE_REMAP=""            # only for transitional dir renames
+   ```
+
+2. Clone that org's repos into the profile's `PROFILE_REPOS_DIR` (or override
+   at run time with `--repos-dir` / `$REPOS_DIR`).
+
+3. Run any program with `--profile myorg` (or `ORG_PROFILE=myorg`):
+
+   ```bash
+   bash scripts/link-health-scanner.sh --profile myorg --dry-run
+   ```
+
+   Individual facts can still be overridden per run without touching the
+   profile, e.g. `--org myorg --fork-owner myfork --repos-dir ~/myorg`.
+
+4. Update the DCO identity in the fixer (`GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`)
+   if fix PRs should be attributed to a different maintainer.
