@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Automation Health Dashboard Generator — kagenti org
+# Automation Health Dashboard Generator
 # Combines link-health and dep-bump program metrics into a single executive-
 # facing markdown dashboard. Pushes to a standing fork-based PR.
 #

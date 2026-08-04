@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Link Health Scanner — kagenti org
+# Link Health Scanner
 # Scans all repos for broken links, creates/closes GitHub issues, writes reports.
 #
 # Usage:
