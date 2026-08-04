@@ -53,7 +53,8 @@ Options:
   --dry-run           Generate and preview dashboard (default)
   --live              Commit and push to fork, create/update PR
   --reports-dir DIR    Base reports directory (default: $REPORTS_DIR or ./reports)
-  --main-repo-dir DIR  Path to the org main repo clone (default: $MAIN_REPO_DIR)
+  --main-repo-dir DIR  Path to the report-target repo clone, overriding the
+                       REPOS_DIR-derived default (default: $MAIN_REPO_DIR)
   --kagenti-dir DIR    Deprecated alias for --main-repo-dir
   --org NAME           GitHub org (default: from profile, config/org.env)
   --fork-owner NAME    Fork owner for PR workflow (default: from profile)
@@ -62,7 +63,8 @@ Options:
 
 Environment:
   REPORTS_DIR    Base directory containing link-scan/ and dep-bump/ subdirs
-  MAIN_REPO_DIR  Path to the org's main repo clone (live mode git ops)
+  MAIN_REPO_DIR  Path to the report-target repo clone (live mode git ops);
+                 overrides the REPOS_DIR-derived default
   FORK_OWNER     Fork owner for cross-fork PRs
 HELP
   exit 0

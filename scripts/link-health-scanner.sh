@@ -33,8 +33,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP. The dashboard-report PR targets $MAIN_REPO via
-# $FORK_OWNER; issue reads use canonical $ORG/<name>.
+# MAIN_REPO, REPOS_DIR, REMAP. Issue reads use canonical $ORG/<name>; $MAIN_REPO
+# backs the related-issue refs and the escalation URL. The report PR itself
+# targets $REPORT_TARGET_REPO (see the report-destination block below).
 load_org_profile
 
 # --- Configuration ---
