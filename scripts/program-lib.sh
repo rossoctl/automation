@@ -850,12 +850,17 @@ load_org_profile() {
   FORK_OWNER="${FORK_OWNER_FLAG:-${FORK_OWNER:-${PROFILE_FORK_OWNER:-clawgenti}}}"
   MAIN_REPO="${MAIN_REPO_FLAG:-${MAIN_REPO:-${PROFILE_MAIN_REPO:-$ORG/$ORG}}}"
   REPOS_DIR="${REPOS_DIR_FLAG:-${REPOS_DIR:-${PROFILE_REPOS_DIR:-$HOME/$ORG}}}"
+  # SOURCE_REPO: the owner/name of the repo where this suite (scripts, skills,
+  # standing orders) is version-controlled. Used to link report PRs back to the
+  # invoking program's standing order for auditability. Defaults to the
+  # automation repo under the active org; a fork can override to its own.
+  SOURCE_REPO="${SOURCE_REPO_FLAG:-${SOURCE_REPO:-${PROFILE_SOURCE_REPO:-$ORG/automation}}}"
   # REMAP is profile-only by design (no flag/env tier): it is a transitional
   # field that self-retires once clone dirs are renamed (rossoctl/automation#37),
   # so it never earns a durable --flag/env knob. An exported REMAP is ignored.
   REMAP="${PROFILE_REMAP:-}"
 
-  export ORG FORK_OWNER MAIN_REPO REPOS_DIR REMAP
+  export ORG FORK_OWNER MAIN_REPO REPOS_DIR SOURCE_REPO REMAP
 }
 
 # Print the core repo allowlist, one "owner/name" per line.
