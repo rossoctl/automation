@@ -74,7 +74,11 @@ REPORTS_DIR="${REPORTS_DIR:-./reports/dep-bump}"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
-FIXER_SIGNATURE="Automated analysis by Kagenti Dep Bump Fixer"
+# Marker appended to every fixer comment; also the dedup key (line 278 searches
+# existing comments for it before posting). Changing this string means comments
+# carrying the OLD marker are no longer recognized, so an already-analyzed PR
+# may receive one duplicate comment on the next run — acceptable, one-time.
+FIXER_SIGNATURE="Automated analysis by Rossoctl Dep Bump Fixer"
 
 # --- Workspace setup ---
 setup_workspace "dep-bump-fixer"

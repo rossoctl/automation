@@ -1,4 +1,4 @@
-## Program: Dep Bump (kagenti org)
+## Program: Dep Bump
 
 **Authority:** Scan repos for stale Dependabot PRs, create/close GitHub issues, write reports
 **Trigger:** Scanner Tue/Thu 7am ET (enforced via cron job `dep-bump-scanner`)
@@ -9,7 +9,7 @@
   - GitHub API rate limit hit: stop issue creation, report partial results
 
 ### Scope
-- All repositories in the kagenti GitHub org (cloned at `~/kagenti/`)
+- The core repositories under the active org (see `config/core-repos.txt`), cloned locally
 - Only open Dependabot PRs (state=open, author=app/dependabot)
 - Coverage audit of .github/dependabot.yml vs detected ecosystems
 
@@ -28,7 +28,7 @@
 ### Operational Notes — Fixer
 - Cron job: `dep-bump-fixer` (Tue/Thu 12pm ET / 16:00 UTC, isolated — 2h after scanner)
 - Reports: `reports/dep-bump/fixer-latest.json`, `reports/dep-bump/fixer-history.json`, `reports/dep-bump/baseline.json`
-- Fixer signature: `_Automated analysis by Kagenti Dep Bump Fixer_`
+- Fixer signature: `_Automated analysis by Rossoctl Dep Bump Fixer_`
 - Manual run: `openclaw cron run dep-bump-fixer`
 - The fixer does NOT merge PRs — it comments with analysis to accelerate human decisions
 - Duplicate prevention: checks for existing fixer signature before posting
@@ -42,4 +42,4 @@ All cron jobs maintain 1h+ separation to avoid crowding Discord:
 - Health dashboard: Daily 17:00 UTC (1pm ET)
 
 ### Epic
-- kagenti/kagenti#1260
+- rossoctl/rossoctl#1260
