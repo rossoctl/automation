@@ -20,7 +20,7 @@ source "$SCRIPT_DIR/program-lib.sh"
 DRY_RUN=true
 VERBOSE=false
 SHOW_HELP=false
-MAIN_REPO_DIR="${MAIN_REPO_DIR:-${KAGENTI_DIR:-}}"
+MAIN_REPO_DIR="${MAIN_REPO_DIR:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -28,9 +28,6 @@ while [[ $# -gt 0 ]]; do
     --live) DRY_RUN=false; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
     --main-repo-dir) MAIN_REPO_DIR="$2"; shift 2 ;;
-    --kagenti-dir)   # deprecated alias, remove after one release
-      echo "WARN: --kagenti-dir is deprecated; use --main-repo-dir" >&2
-      MAIN_REPO_DIR="$2"; shift 2 ;;
     --profile) PROFILE_FLAG="$2"; shift 2 ;;
     --org) ORG_FLAG="$2"; shift 2 ;;
     --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
@@ -56,7 +53,6 @@ Options:
   --reports-dir DIR    Base reports directory (default: $REPORTS_DIR or ./reports)
   --main-repo-dir DIR  Path to the report-target repo clone, overriding the
                        REPOS_DIR-derived default (default: $MAIN_REPO_DIR)
-  --kagenti-dir DIR    Deprecated alias for --main-repo-dir
   --profile NAME       Org profile to load (config/org.<name>.env; default org.env)
   --org NAME           GitHub org (default: from profile, config/org.env)
   --fork-owner NAME    Fork owner for PR workflow (default: from profile)
@@ -477,10 +473,12 @@ else
 
   cd "$REPORT_TARGET_DIR"
 
-  # Ensure fork remote exists
-  if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
-  fi
+  # Ensure the fork remote exists AND points at the current target. set-url
+  # corrects a stale remote (e.g. one left by a prior deployment pointing at the
+  # old report repo); the || add branch handles the not-yet-registered case.
+  fork_url="https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
+  git remote set-url "$FORK_REMOTE" "$fork_url" 2>/dev/null \
+    || git remote add "$FORK_REMOTE" "$fork_url"
 
   # Fetch fork's branch if it exists, otherwise create from main
   if git fetch "$FORK_REMOTE" "$DASHBOARD_BRANCH" 2>/dev/null; then

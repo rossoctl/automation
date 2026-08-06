@@ -56,7 +56,9 @@ REPORT_TARGET_PATH="automation-health/link-health.md"
 # else derive from REPOS_DIR.
 REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
 
-FORK_REMOTE="clawgenti-kagenti-fork"
+# Fork remote name for the report-target push. Derived from the profile so it
+# carries no org literal; a stale remote of this name is corrected below.
+FORK_REMOTE="$FORK_OWNER-automation-fork"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
@@ -465,10 +467,12 @@ else
 
   cd "$REPORT_TARGET_DIR"
 
-  # Ensure fork remote exists
-  if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
-  fi
+  # Ensure the fork remote exists AND points at the current target. set-url
+  # corrects a stale remote (e.g. one left by a prior deployment pointing at the
+  # old report repo); the || add branch handles the not-yet-registered case.
+  fork_url="https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
+  git remote set-url "$FORK_REMOTE" "$fork_url" 2>/dev/null \
+    || git remote add "$FORK_REMOTE" "$fork_url"
 
   # Fetch fork's branch if it exists, otherwise create from main
   if git fetch "$FORK_REMOTE" link-health/reports 2>/dev/null; then
