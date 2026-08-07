@@ -853,8 +853,9 @@ load_org_profile() {
   # SOURCE_REPO: the owner/name of the repo where this suite (scripts, skills,
   # standing orders) is version-controlled. Used to link report PRs back to the
   # invoking program's standing order for auditability. Defaults to the
-  # automation repo under the active org; a fork can override to its own.
-  SOURCE_REPO="${SOURCE_REPO_FLAG:-${SOURCE_REPO:-${PROFILE_SOURCE_REPO:-$ORG/automation}}}"
+  # automation repo under the active org; a fork can override via env or profile.
+  # No --flag tier: this is a deploy-level constant, not a per-invocation knob.
+  SOURCE_REPO="${SOURCE_REPO:-${PROFILE_SOURCE_REPO:-$ORG/automation}}"
   # REMAP is profile-only by design (no flag/env tier): it is a transitional
   # field that self-retires once clone dirs are renamed (rossoctl/automation#37),
   # so it never earns a durable --flag/env knob. An exported REMAP is ignored.

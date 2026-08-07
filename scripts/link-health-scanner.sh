@@ -453,15 +453,10 @@ if [ "$DRY_RUN" = true ]; then
   echo "[DRY RUN] Dashboard preview:"
   cat "$TMPDIR/link-health.md"
 else
-  if [ -z "$REPORT_TARGET_DIR" ]; then
-    echo "ERROR: report target clone dir is not set (required for live mode)."
-    echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
-    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
-    exit 1
-  fi
-
   if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
     echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
+    echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
     exit 1
   fi
 
