@@ -22,7 +22,22 @@ reports/           (gitignored) Runtime data stays on remote host only
 | Dependency Bump | `scripts/dep-bump-scanner.sh` | `scripts/dep-bump-fixer.sh` | Tracks and triages Dependabot PRs across repos (comments, closes stale, audits coverage) |
 | Health Dashboard | `scripts/automation-health-dashboard.sh` | — | Aggregates program run health into a dashboard |
 
-Shared helpers live in `scripts/program-lib.sh`. Repo coverage comes from the `config/core-repos.txt` allowlist via `get_core_repos()` (one **bare repo name** per line -- the owner is prepended from the active org; `#` comments and blank lines allowed) -- edit that file to change which repos are scanned.
+Shared helpers live in `scripts/program-lib.sh`, a thin aggregator that sources four focused library modules (see [Library structure & portability](#library-structure--portability)). Repo coverage comes from the `config/core-repos.txt` allowlist via `get_core_repos()` (one **bare repo name** per line -- the owner is prepended from the active org; `#` comments and blank lines allowed) -- edit that file to change which repos are scanned.
+
+## Library structure & portability
+
+Shared shell helpers live in four flat modules under `scripts/`, sourced through the `program-lib.sh` aggregator so program scripts can `source "$SCRIPT_DIR/program-lib.sh"` unchanged:
+
+| Module | Responsibility |
+|--------|----------------|
+| `core.sh` | Workspace/temp management, portable date math, JSON-schema validation, scan diffing, report file I/O |
+| `github-api.sh` | Rate-limit-aware `gh` wrapper, issue read/close/PR-check helpers |
+| `fork.sh` | Fork/PR creation, issue-field validation, link-fix candidate scoring |
+| `org.sh` | Org-profile loading, core-repo allowlist reads, canonical-name remap, repos-dir validation |
+
+Each module has a load-once guard, so it is safe to source more than once (and a subset can be vendored on its own).
+
+**Portability contract:** the suite targets **bash 3.2+** (macOS's default) through modern bash. Do not introduce associative arrays (`declare -A`), `mapfile`/`readarray`, or GNU-only `sed`/`grep`/`date` flags without a BSD-compatible fallback. CI (`.github/workflows/tests.yml`) runs the test suite on both Linux and macOS and shellchecks the library modules, so the macOS leg catches bash-4-isms automatically.
 
 ## Org profile
 
