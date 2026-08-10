@@ -11,7 +11,7 @@
 ### Scope
 - Repositories: the core allowlist (see `config/core-repos.txt`)
 - Only open PRs with the `ready-for-ai-review` label
-- Uses the `github:pr-review` skill
+- Uses the `github-pr-review` skill, sourced from the `agent-skills` checkout (see Skill Source below)
 
 ### Architecture: Scanner/Fixer Pattern
 
@@ -85,7 +85,7 @@ Entries are removed from state when:
 
 **Cron jobs:**
 - `pr-review-scanner`: bash-only, no LLM cost
-- `pr-review-fixer`: agent turn using `github:pr-review` skill
+- `pr-review-fixer`: agent turn using the `github-pr-review` skill (see Skill Source below)
 
 ### Reports
 
@@ -115,3 +115,12 @@ Entries are removed from state when:
 - Scanner: every 15 minutes (lightweight, no LLM)
 - Fixer: every 15 minutes, offset ~5 min from scanner
 - Manual run: `openclaw cron run pr-review-scanner` / `openclaw cron run pr-review-fixer`
+
+### Skill Source
+- The fixer sources the `github-pr-review` skill from the on-host `agent-skills` checkout
+  (`agent-skills/skills/github-pr-review/SKILL.md`), NOT from a per-repo `.claude/skills/` copy.
+- This is the migrated, version-controlled skill (rossoctl/agent-skills); it replaced the
+  former `github:pr-review` skill that lived in `rossoctl/rossoctl/.claude/skills/`.
+- Wiring lives in the fixer cron's agentTurn payload (the skill path the review step follows);
+  update it with `openclaw cron edit <fixer-job-id> --message "…"`, never by hand-editing jobs.json.
+- Keep the checkout current (`git pull`) so the fixer reads the latest reviewed skill.
