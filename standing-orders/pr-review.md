@@ -1,4 +1,4 @@
-## Program: PR Review (kagenti org)
+## Program: PR Review
 
 **Authority:** Review PRs labeled `ready-for-ai-review`, post review comments
 **Trigger:** Scanner every 15 min; fixer every 15 min (offset ~5 min)
@@ -6,10 +6,10 @@
 **Identity:** clawgenti (single identity, no switching)
 **Approval gate:** None. Comments only, never blocks merge.
 **Branding:** "Clawgenti Code Review"
-**Tracking:** kagenti/kagenti#1910
+**Tracking:** rossoctl/rossoctl#1910
 
 ### Scope
-- Repositories: kagenti/kagenti, kagenti/kagenti-extensions (initial rollout)
+- Repositories: the core allowlist (see `config/core-repos.txt`)
 - Only open PRs with the `ready-for-ai-review` label
 - Uses the `github:pr-review` skill
 

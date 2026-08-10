@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Dependency Bump Scanner — rossoctl org
+# Dependency Bump Scanner
 # Monitors Dependabot PRs, classifies by severity, flags SLA breaches,
 # creates/closes GitHub issues, writes reports.
 #
@@ -21,14 +21,14 @@ source "$SCRIPT_DIR/program-lib.sh"
 # --- CLI args ---
 DRY_RUN=false
 ISSUE_LIMIT=0  # 0 = unlimited
-ORG="rossoctl"  # display/report-tag only; repo reads use canonical rossoctl/<name> (see get_core_repos)
 SHOW_HELP=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
-    --org) ORG="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
@@ -44,7 +44,8 @@ USAGE:
 OPTIONS:
   --dry-run         Scan and report only; do not create/close issues
   --issue-limit N   Create at most N issues per run (0 = unlimited)
-  --org NAME        GitHub org to scan (default: rossoctl)
+  --profile NAME    Org profile to load (config/org.<name>.env; default org.env)
+  --org NAME        GitHub org to scan (default: from profile, config/org.env)
   --help, -h        Show this help
 
 ENVIRONMENT:
@@ -63,6 +64,10 @@ SEVERITY SLAs:
 USAGE
   exit 0
 fi
+
+# Resolve org identity (--org > env > profile > default). Sets ORG, FORK_OWNER,
+# MAIN_REPO, REPOS_DIR, REMAP. Repo reads use canonical $ORG/<name>.
+load_org_profile
 
 # --- Configuration ---
 validate_repos_dir "${REPOS_DIR:-}"
@@ -159,7 +164,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   # Strip trailing comma
   ecosystems="${ecosystems%,}"
 
-  # Store the canonical repo name so Step 2 builds correct rossoctl/<name> refs.
+  # Store the canonical repo name so Step 2 builds correct $ORG/<name> refs.
   jq -nc --arg repo "$canon" --arg eco "$ecosystems" \
     '{repo: $repo, ecosystems: ($eco | split(",") | map(select(. != "")))}' \
     >> "$TMPDIR/ecosystems.jsonl"
@@ -177,7 +182,7 @@ TOTAL_OPEN_PRS=0
 
 while IFS= read -r eco_record; do
   repo_name=$(echo "$eco_record" | jq -r '.repo')   # canonical name from Step 1
-  full_repo="rossoctl/$repo_name"
+  full_repo="$ORG/$repo_name"
 
   echo "  Checking $repo_name..."
 
@@ -434,7 +439,7 @@ while IFS='|' read -r issue_repo issue_pr_number; do
   overdue=$((age_days - sla_days))
 
   # Record repos are canonical names (see Step 1); build canonical refs.
-  full_repo="rossoctl/$issue_repo"
+  full_repo="$ORG/$issue_repo"
 
   # Deduplication
   search_term="[dep-bump] Stale $severity bump: $package in $issue_repo"
@@ -513,7 +518,7 @@ ISSUES_CLOSED=0
 while IFS='|' read -r fix_repo fix_pr_number; do
   [ -z "$fix_repo" ] && continue
 
-  full_repo="rossoctl/$fix_repo"
+  full_repo="$ORG/$fix_repo"
 
   # Find matching open issue by searching for the PR number in title/body
   issue_number=$(gh issue list --repo "$full_repo" \

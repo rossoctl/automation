@@ -20,7 +20,6 @@ source "$SCRIPT_DIR/program-lib.sh"
 # --- CLI args ---
 DRY_RUN=true  # Safe by default
 ISSUE_LIMIT=15
-ORG="kagenti"
 VERBOSE=false
 SHOW_HELP=false
 
@@ -29,7 +28,8 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     --live) DRY_RUN=false; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
-    --org) ORG="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -47,7 +47,8 @@ OPTIONS:
   --dry-run         Analyze and preview comments only (default)
   --live            Post comments on PRs and issues
   --issue-limit N   Process at most N issues (default: 5)
-  --org NAME        GitHub org (default: kagenti)
+  --profile NAME    Org profile to load (config/org.<name>.env; default org.env)
+  --org NAME        GitHub org (default: from profile, config/org.env)
   --verbose         Print additional diagnostic output
   --help, -h        Show this help
 
@@ -61,6 +62,11 @@ USAGE
   exit 0
 fi
 
+# Resolve org identity (--org > env > profile > default). Sets ORG, FORK_OWNER,
+# MAIN_REPO, REPOS_DIR, REMAP. Reads use canonical $ORG/<name>; write paths
+# (fork PRs) derive from $ORG/$FORK_OWNER.
+load_org_profile
+
 # --- Configuration ---
 validate_repos_dir "${REPOS_DIR:-}"
 
@@ -68,8 +74,11 @@ REPORTS_DIR="${REPORTS_DIR:-./reports/dep-bump}"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
-FORK_OWNER="clawgenti"
-FIXER_SIGNATURE="Automated analysis by Kagenti Dep Bump Fixer"
+# Marker appended to every fixer comment; also the dedup key (line 278 searches
+# existing comments for it before posting). Changing this string means comments
+# carrying the OLD marker are no longer recognized, so an already-analyzed PR
+# may receive one duplicate comment on the next run — acceptable, one-time.
+FIXER_SIGNATURE="Automated analysis by Rossoctl Dep Bump Fixer"
 
 # --- Workspace setup ---
 setup_workspace "dep-bump-fixer"
@@ -111,7 +120,7 @@ if [ ! -f "$REPORTS_DIR/baseline.json" ]; then
     esac
     SEEN_CANON="$SEEN_CANON $canon"
 
-    gh pr list --repo "rossoctl/$canon" \
+    gh pr list --repo "$ORG/$canon" \
       --author "app/dependabot" \
       --state merged \
       --json number,createdAt,mergedAt \
@@ -179,7 +188,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   SEEN_CANON="$SEEN_CANON $canon"
 
   REPOS_CHECKED=$((REPOS_CHECKED + 1))
-  full_repo="rossoctl/$canon"
+  full_repo="$ORG/$canon"
 
   issues_json=$(gh issue list --repo "$full_repo" \
     --search "[dep-bump] in:title" \
@@ -554,7 +563,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   esac
   SEEN_CANON_TTM="$SEEN_CANON_TTM $canon"
 
-  gh pr list --repo "rossoctl/$canon" \
+  gh pr list --repo "$ORG/$canon" \
     --author "app/dependabot" \
     --state merged \
     --json number,createdAt,mergedAt \

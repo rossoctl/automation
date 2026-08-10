@@ -44,7 +44,15 @@ carry pre-rename names, and self-retires (see `#37`).
 | Fork owner | `FORK_OWNER` | `clawgenti` | write path: `FORK_OWNER/<canonical>` |
 | Main repo | `MAIN_REPO` | `$ORG/$ORG` | dashboard / report PR target (only programs that open such PRs use it) |
 | Clone root | `REPOS_DIR` | `$HOME/$ORG` | local clone iteration |
+| Source repo | `SOURCE_REPO` | `$ORG/automation` | standing-order link in report PRs (added during PR B; see addendum) |
 | Dir remap (transitional) | `REMAP` | empty ⇒ identity | pre-rename clone dir basename → canonical name |
+
+> **Addendum (PR B, 2026-08):** `SOURCE_REPO` was added during PR B implementation,
+> beyond the original identity set above. It names the repo where the suite (scripts,
+> skills, standing orders) is version-controlled, so report PRs can link back to the
+> invoking program's standing order for auditability. It follows the same precedence
+> as the other facts except it has no `--flag` tier (env > profile > default) — it is
+> a deploy-level constant, not a per-invocation knob.
 
 ### Settled decision: fork name = canonical name (Option B)
 

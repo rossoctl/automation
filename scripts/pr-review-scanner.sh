@@ -11,6 +11,59 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/program-lib.sh"
 
+# --- CLI args ---
+VERBOSE=false
+DRY_RUN=false
+SHOW_HELP=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --verbose) VERBOSE=true; shift ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
+    --help|-h) SHOW_HELP=true; shift ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+# Short-circuit --help before loading a profile or reading the allowlist, so
+# usage works even in a checkout with a missing/malformed org profile.
+if [ "$SHOW_HELP" = true ]; then
+  cat << 'USAGE'
+pr-review-scanner -- Discover PRs needing AI review
+
+USAGE:
+  pr-review-scanner.sh [OPTIONS]
+
+OPTIONS:
+  --verbose           Print diagnostic output to stderr
+  --dry-run           Query GitHub but do not write reports (stdout output still produced)
+  --reports-dir DIR   Where to write reports (default: $REPORTS_DIR or ./reports/pr-review)
+  --profile NAME      Org profile to load (config/org.<name>.env; default org.env)
+  --org NAME          GitHub org (default: from profile, config/org.env)
+  --help, -h          Show this help
+
+OUTPUT:
+  JSON array of eligible PRs to stdout:
+  [{"repo": "rossoctl/rossoctl", "number": 123, "head_sha": "abc123"}]
+
+REPORTS:
+  latest.json   Current scan results (overwritten each run)
+  history.json  Scan history (appended, capped at 500 rows)
+  state.json    Coordination state (in_progress, reviewed entries)
+
+PREREQUISITES:
+  gh (authenticated as clawgenti), jq
+USAGE
+  exit 0
+fi
+
+# Resolve org identity (env > profile > default) before reading the allowlist;
+# get_core_repos() prepends $ORG and fails loud if it is unset.
+load_org_profile
+
 # --- Configuration ---
 BOT_USER="clawgenti"
 
@@ -33,49 +86,6 @@ REVIEW_MARKER="<!-- reviewed:"
 STALE_THRESHOLD_MIN=30
 TTL_DAYS=30
 MAX_HISTORY_ROWS=500
-
-# --- CLI args ---
-VERBOSE=false
-DRY_RUN=false
-SHOW_HELP=false
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --verbose) VERBOSE=true; shift ;;
-    --dry-run) DRY_RUN=true; shift ;;
-    --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
-    --help|-h) SHOW_HELP=true; shift ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
-  esac
-done
-
-if [ "$SHOW_HELP" = true ]; then
-  cat << 'USAGE'
-pr-review-scanner -- Discover PRs needing AI review
-
-USAGE:
-  pr-review-scanner.sh [OPTIONS]
-
-OPTIONS:
-  --verbose           Print diagnostic output to stderr
-  --dry-run           Query GitHub but do not write reports (stdout output still produced)
-  --reports-dir DIR   Where to write reports (default: $REPORTS_DIR or ./reports/pr-review)
-  --help, -h          Show this help
-
-OUTPUT:
-  JSON array of eligible PRs to stdout:
-  [{"repo": "rossoctl/rossoctl", "number": 123, "head_sha": "abc123"}]
-
-REPORTS:
-  latest.json   Current scan results (overwritten each run)
-  history.json  Scan history (appended, capped at 500 rows)
-  state.json    Coordination state (in_progress, reviewed entries)
-
-PREREQUISITES:
-  gh (authenticated as clawgenti), jq
-USAGE
-  exit 0
-fi
 
 # --- Workspace and reports setup ---
 setup_workspace "pr-review-scanner"

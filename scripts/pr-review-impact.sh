@@ -51,6 +51,8 @@ while [[ $# -gt 0 ]]; do
     --verbose) VERBOSE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -74,6 +76,8 @@ Options:
   --dry-run           Compute and print impact.json to stdout; do not write
   --reports-dir DIR   Where to write impact.json (default: ./reports/pr-review,
                       or $REPORTS_DIR if set in the environment)
+  --profile NAME      Org profile to load (config/org.<name>.env; default org.env)
+  --org NAME          GitHub org (default: from profile, config/org.env)
   --help, -h          Show this help
 
 NOTES:
@@ -89,6 +93,10 @@ REQUIRES:
 USAGE
   exit 0
 fi
+
+# Resolve org identity (env > profile > default) before reading the allowlist;
+# get_core_repos() prepends $ORG and fails loud if it is unset.
+load_org_profile
 
 # --- Workspace and reports setup ---
 setup_workspace "pr-review-impact"

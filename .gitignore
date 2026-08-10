@@ -1,2 +1,5 @@
 reports/
 *.log
+
+# Local copies of host cron/job state (contains deployment internals; never commit)
+.host-backup/

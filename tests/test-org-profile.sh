@@ -82,4 +82,20 @@ if ( ORG_PROFILE_FILE="$TEST_TMPDIR/org.noorg.env"; load_org_profile ) >/dev/nul
   echo "FAIL should error when ORG cannot be resolved"; fail=1
 fi
 
-[ "$fail" -eq 0 ] && echo "PASS: load_org_profile (precedence, clobber-safety, defaults, fail-loud)" || exit 1
+# --- portability: a foreign-org profile yields testorg/* with no leak ---
+cat > "$TEST_TMPDIR/core.txt" <<'EOF'
+repo-one
+repo-two
+EOF
+got=$(
+  ORG_PROFILE_FILE="$SCRIPT_DIR/fixtures/org.testorg.env"
+  load_org_profile >/dev/null 2>&1
+  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" get_core_repos
+)
+want=$'testorg/repo-one\ntestorg/repo-two'
+[ "$got" = "$want" ] || { echo "FAIL portability: got [$got]"; fail=1; }
+case "$got" in
+  *rossoctl*|*kagenti*) echo "FAIL portability: org leak in [$got]"; fail=1 ;;
+esac
+
+[ "$fail" -eq 0 ] && echo "PASS: load_org_profile (precedence, clobber-safety, defaults, fail-loud, portability)" || exit 1

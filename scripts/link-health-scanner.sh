@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # =============================================================================
-# Link Health Scanner — kagenti org
+# Link Health Scanner
 # Scans all repos for broken links, creates/closes GitHub issues, writes reports.
 #
 # Usage:
@@ -25,16 +25,40 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
+    --profile) PROFILE_FLAG="$2"; shift 2 ;;
+    --org) ORG_FLAG="$2"; shift 2 ;;
+    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
+    --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
+# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
+# MAIN_REPO, REPOS_DIR, REMAP. Issue reads use canonical $ORG/<name>; $MAIN_REPO
+# backs the related-issue refs and the escalation URL. The report PR itself
+# targets $REPORT_TARGET_REPO (see the report-destination block below).
+load_org_profile
+
 # --- Configuration ---
-REPOS_DIR="${REPOS_DIR:-$HOME/kagenti}"
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
-KAGENTI_REPO="$REPOS_DIR/kagenti"
-FORK_REMOTE="clawgenti-kagenti-fork"
-FORK_OWNER="clawgenti"
+
+# Report-PR destination. The org main repo's docs/ folder feeds the docs site
+# (rossoctl.dev) and cannot host machine-generated reports, so the standing
+# report PR lands under automation-health/ in the automation repo. A single
+# file, overwritten in place each run: trend tooling reconstructs history by
+# replaying git commit parents, so we store state (not dated snapshots) and
+# avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
+REPORT_TARGET_REPO="$ORG/automation"
+REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
+REPORT_TARGET_PATH="automation-health/link-health.md"
+
+# Clone dir for the report target: honor an explicit MAIN_REPO_DIR override,
+# else derive from REPOS_DIR.
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
+
+# Fork remote name for the report-target push. Derived from the profile so it
+# carries no org literal; a stale remote of this name is corrected below.
+FORK_REMOTE="$FORK_OWNER-automation-fork"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
@@ -425,16 +449,25 @@ DASHBOARD_EOF
 
 # Commit and push dashboard
 if [ "$DRY_RUN" = true ]; then
-  echo "[DRY RUN] Would push docs/link-health.md to fork and create/update cross-fork PR"
+  echo "[DRY RUN] Would push $REPORT_TARGET_PATH to fork and create/update cross-fork PR against $REPORT_TARGET_REPO"
   echo "[DRY RUN] Dashboard preview:"
   cat "$TMPDIR/link-health.md"
 else
-  cd "$KAGENTI_REPO"
-
-  # Ensure fork remote exists
-  if ! git remote get-url "$FORK_REMOTE" &>/dev/null; then
-    git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/kagenti.git"
+  if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
+    echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
+    echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
+    exit 1
   fi
+
+  cd "$REPORT_TARGET_DIR"
+
+  # Ensure the fork remote exists AND points at the current target. set-url
+  # corrects a stale remote (e.g. one left by a prior deployment pointing at the
+  # old report repo); the || add branch handles the not-yet-registered case.
+  fork_url="https://github.com/$FORK_OWNER/${REPORT_TARGET_NAME}.git"
+  git remote set-url "$FORK_REMOTE" "$fork_url" 2>/dev/null \
+    || git remote add "$FORK_REMOTE" "$fork_url"
 
   # Fetch fork's branch if it exists, otherwise create from main
   if git fetch "$FORK_REMOTE" link-health/reports 2>/dev/null; then
@@ -445,19 +478,19 @@ else
       || git checkout -B link-health/reports
   fi
 
-  mkdir -p docs
-  cp "$TMPDIR/link-health.md" docs/link-health.md
-  git add docs/link-health.md
+  mkdir -p "$(dirname "$REPORT_TARGET_PATH")"
+  cp "$TMPDIR/link-health.md" "$REPORT_TARGET_PATH"
+  git add "$REPORT_TARGET_PATH"
   git commit -s -m "docs: Update link health dashboard ($SCAN_ID)" 2>/dev/null || echo "No changes to commit"
   git push "$FORK_REMOTE" link-health/reports 2>/dev/null || echo "WARN: Failed to push dashboard to fork"
 
   # Create or update standing cross-fork PR
-  existing_pr=$(gh api "repos/kagenti/kagenti/pulls?head=$FORK_OWNER:link-health/reports&state=open" \
+  existing_pr=$(gh api "repos/$REPORT_TARGET_REPO/pulls?head=$FORK_OWNER:link-health/reports&state=open" \
     --jq '.[0].number' 2>/dev/null || echo "")
 
   pr_body="## Summary
 
-Auto-updated by Kagenti Link Health Scanner. This PR is continuously updated with each scan. Merge when convenient.
+Auto-updated by Rossoctl Link Health Scanner. This PR is continuously updated with each scan. Merge when convenient.
 
 | Metric | Value |
 |--------|-------|
@@ -469,15 +502,19 @@ Auto-updated by Kagenti Link Health Scanner. This PR is continuously updated wit
 
 ## Related issue(s)
 
-- kagenti/kagenti#1178"
+- $MAIN_REPO#1178
+
+## Automation program
+
+Generated by the [Rossoctl Link Health Scanner](https://github.com/$SOURCE_REPO/blob/main/standing-orders/link-health.md)."
 
   if [ -z "$existing_pr" ] || [ "$existing_pr" = "null" ]; then
-    gh pr create --repo kagenti/kagenti \
+    gh pr create --repo "$REPORT_TARGET_REPO" \
       --head "$FORK_OWNER:link-health/reports" --base main \
       --title "docs: Link health report (auto-updated)" \
       --body "$pr_body" 2>/dev/null || echo "WARN: Failed to create dashboard PR"
   else
-    gh pr edit "$existing_pr" --repo kagenti/kagenti --body "$pr_body" 2>/dev/null || true
+    gh pr edit "$existing_pr" --repo "$REPORT_TARGET_REPO" --body "$pr_body" 2>/dev/null || true
   fi
 fi
 
@@ -488,7 +525,7 @@ if [ "$NEW_LINKS" -gt "$ESCALATION_THRESHOLD" ]; then
   echo ""
   echo "ALERT: Link health scan found $NEW_LINKS new broken links (threshold: $ESCALATION_THRESHOLD)."
   echo "This may indicate a bulk documentation change or a widespread external service outage."
-  echo "Review issues at https://github.com/kagenti/kagenti/issues?q=label:broken-link"
+  echo "Review issues at https://github.com/$MAIN_REPO/issues?q=label:broken-link"
 fi
 
 # --- Summary ---
