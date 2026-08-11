@@ -73,11 +73,9 @@ The usage matrix showed `score_path_suffix` and `core_repo_names` with no *exter
 
 No functions are removed. A pure refactor preserves the public surface.
 
-## Dependency loading: self-sourcing modules with a load-once guard
+## Dependency loading: load-once guards, self-source only real dependencies
 
-`github-api.sh`, `fork.sh`, and `org.sh` all use helpers from `core.sh`; `fork.sh` additionally uses
-`github-api.sh`. Rather than making callers know the load order, **each module sources its own
-dependencies** at the top, protected by a **load-once guard** so repeated sourcing is a no-op.
+Every module opens with a **load-once guard** so repeated sourcing is a no-op:
 
 ```sh
 # top of core.sh
@@ -85,31 +83,36 @@ dependencies** at the top, protected by a **load-once guard** so repeated sourci
 _CORE_SH_LOADED=1
 ```
 
+**A module self-sources another module only if its own function bodies actually call that
+module's helpers** — the load list is driven by measured call-sites, not by category. The
+decomposition was verified empirically (grep each module's bodies for cross-module helper names)
+rather than assumed, and the finding was that the current split has **no intra-library
+dependencies**: `github-api.sh`, `fork.sh`, and `org.sh` each define functions that invoke `gh`,
+`git`, `jq`, and shell builtins directly, and none of them call a `core.sh` helper (nor does
+`fork.sh` call a `github-api.sh` helper). So each of the four modules is guard-only — no `source`
+lines beyond the guard.
+
+If a future change makes one module call another's helper, that module gains a self-source block
+resolved relative to **its own** location (not the caller's), so it works no matter which directory
+it is sourced from or vendored into:
+
 ```sh
-# top of fork.sh
-[ -n "${_FORK_SH_LOADED:-}" ] && return
-_FORK_SH_LOADED=1
+# self-source pattern, added only when a real cross-module call is introduced
 _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$_LIB_DIR/core.sh"
-# shellcheck source=/dev/null
-. "$_LIB_DIR/github-api.sh"
 ```
 
-Each module resolves its dependencies relative to **its own** location
-(`$(dirname "${BASH_SOURCE[0]}")`), not the caller's, so it works no matter which directory it is
-sourced from or vendored into.
-
-**Why self-sourcing (given the vendoring direction):** a consumer copying only `fork.sh` + its dependencies into
-another harness can `source fork.sh` and it works — the module declares its needs in code, not in
-prose a copier must read. The guard makes double-sourcing (e.g. a script that pulls in both
-`fork.sh` and `github-api.sh`, each of which loads `core.sh`) harmless. Runtime cost is a one-time
-variable check at startup — negligible.
+**Why measure rather than pre-wire (given the vendoring direction):** a consumer copying only
+`fork.sh` into another harness gets a genuinely self-contained file, and no module declares a
+dependency it does not use. When a real dependency does exist, the module declares it in code — not
+in prose a copier must read — and the guard makes double-sourcing harmless. Runtime cost of a guard
+check is a one-time variable test at startup — negligible.
 
 ### The aggregator
 
-`program-lib.sh` becomes a thin file that sources the four modules in dependency order (the guards
-make order-robustness automatic, but sourcing in order keeps it readable):
+`program-lib.sh` becomes a thin file that sources the four modules (the guards make load order
+irrelevant; the aggregator lists them in a stable, readable order):
 
 ```sh
 #!/usr/bin/env bash
