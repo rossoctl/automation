@@ -1,6 +1,6 @@
 # Link Health Report
 
-> Last scan: 2026-08-07 07:00 ET | Scan ID: 2026-08-07-001
+> Last scan: 2026-08-10 07:00 ET | Scan ID: 2026-08-10-001
 
 ## Summary
 
@@ -10,13 +10,14 @@
 | Total links checked | 1752 |
 | Broken (internal) | 11 |
 | Broken (external) | 13 |
-| New since last scan | +2 |
+| New since last scan | +0 |
 | Fixed since last scan | -0 |
 
 ## Trend (last 10 scans)
 
 | Date | Internal | External | Delta |
 |------|----------|----------|-------|
+| 08-10 | 11 | 13 | 0 |
 | 08-07 | 11 | 13 | +2 |
 | 08-05 | 10 | 12 | +2 |
 | 08-04 | 0 | 0 | -26 |
@@ -26,7 +27,6 @@
 | 07-24 | 53 | 653 | +77 |
 | 07-20 | 28 | 601 | -26 |
 | 07-17 | 32 | 623 | -8 |
-| 07-15 | 33 | 630 | +42 |
 
 ## Broken Links by Repo
 
