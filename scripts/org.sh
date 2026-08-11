@@ -4,6 +4,10 @@
 #
 # ## Portability
 # Targets bash 3.2+ (macOS default) through modern bash.
+#
+# No intra-library deps: functions invoke gh/git/jq/builtins directly, so this
+# module sources no sibling module. Self-contained for vendoring. (load_org_profile
+# does source a runtime org-profile data file — that is caller data, not a module.)
 [ -n "${_ORG_SH_LOADED:-}" ] && return
 _ORG_SH_LOADED=1
 

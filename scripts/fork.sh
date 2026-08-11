@@ -4,6 +4,11 @@
 #
 # ## Portability
 # Targets bash 3.2+ (macOS default) through modern bash.
+#
+# No intra-library deps: every function here invokes gh/git/jq directly, so this
+# module sources no sibling module. Self-contained for vendoring — copy it alone.
+# If a function later calls a core.sh/github-api.sh helper, add a self-source
+# block after the guard (resolved via ${BASH_SOURCE[0]}), per the design doc.
 [ -n "${_FORK_SH_LOADED:-}" ] && return
 _FORK_SH_LOADED=1
 

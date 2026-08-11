@@ -4,6 +4,9 @@
 #
 # ## Portability
 # Targets bash 3.2+ (macOS default) through modern bash.
+#
+# No intra-library deps: functions invoke gh/jq directly, so this module sources
+# no sibling module. Self-contained for vendoring.
 [ -n "${_GITHUB_API_SH_LOADED:-}" ] && return
 _GITHUB_API_SH_LOADED=1
 
