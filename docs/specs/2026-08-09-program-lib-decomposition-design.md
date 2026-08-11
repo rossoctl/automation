@@ -1,7 +1,7 @@
 # program-lib.sh Decomposition Design — Portable, Vendorable Modules
 
 **Date:** 2026-08-09
-**Status:** Design (awaiting review)
+**Status:** Implemented — 2026-08-09
 **Related:** `#35` (lib decomposition), epic `#32` (rename cleanup, now complete), `#2149` (agent-skills sync — downstream consumer of this work)
 
 ## Problem
@@ -154,7 +154,9 @@ workflows are present):
 
 - **Matrix:** `ubuntu-latest` + `macos-latest`. The macOS runner exercises BSD `date`/`sed`/`grep`
   and an older-bash environment, catching the `declare -A` class of defect automatically.
-- **Steps:** run every `tests/*.sh`; run `shellcheck` over `scripts/*.sh`.
+- **Steps:** run every `tests/*.sh`; run `shellcheck` over the library modules
+  (`core.sh`, `github-api.sh`, `fork.sh`, `org.sh`, `program-lib.sh`). Consumer-script linting is
+  deferred to #52 (19 pre-existing `SC2034` `*_FLAG` warnings, out of scope for this refactor).
 
 ## Equivalence verification (pure refactor)
 
