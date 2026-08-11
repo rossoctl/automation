@@ -17,5 +17,5 @@ jobs:
       pull-requests: write
       contents: read
 
-    uses: kagenti/.github/.github/workflows/add-to-project.yml@99700ebe858a1bc566492b1de9aea6e764ee226f # 2026-05-05
+    uses: rossoctl/.github/.github/workflows/add-to-project.yml@99700ebe858a1bc566492b1de9aea6e764ee226f # 2026-05-05
     secrets: inherit
