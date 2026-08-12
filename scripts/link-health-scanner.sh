@@ -392,12 +392,22 @@ _lhs_ic_get() {   # $1=repo -> prints its count, or 0 if absent
     | awk -F'\t' -v r="$1" '$1==r{c=$2; found=1} END{print (found ? c : 0)}'
 }
 _lhs_ic_incr() {  # $1=repo -> increment its count by 1
-  local cur
+  local cur rest
   cur=$(_lhs_ic_get "$1")
-  # Drop any existing row for this repo, then append the new count.
-  ISSUE_COUNTS=$(printf '%s\n' "$ISSUE_COUNTS" | awk -F'\t' -v r="$1" '$1!=r')
-  ISSUE_COUNTS="${ISSUE_COUNTS}
+  # Drop any existing row for this repo. Guard the empty case so we do not
+  # feed awk a lone blank record (which would echo back an empty row).
+  if [ -n "$ISSUE_COUNTS" ]; then
+    rest=$(printf '%s\n' "$ISSUE_COUNTS" | awk -F'\t' -v r="$1" '$1!=r')
+  else
+    rest=""
+  fi
+  # Append the new count, keeping the accumulator free of leading blank rows.
+  if [ -n "$rest" ]; then
+    ISSUE_COUNTS="${rest}
 $1	$(( cur + 1 ))"
+  else
+    ISSUE_COUNTS="$1	$(( cur + 1 ))"
+  fi
 }
 
 if [ -n "$issue_search" ]; then
