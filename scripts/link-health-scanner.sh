@@ -382,10 +382,37 @@ TREND_TABLE=$(jq -r '
 # Build per-repo breakdown with issue counts
 # Single org-wide query for all open scanner issues, then count client-side
 issue_search=$(gh_with_backoff search issues "org:rossoctl in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
-declare -A ISSUE_COUNTS
+# bash 3.2 (macOS default) has no associative arrays. Keep counts in a
+# newline-delimited accumulator of "repo<TAB>count" rows; repo keys are
+# owner/name (no whitespace), so tab-splitting is unambiguous.
+ISSUE_COUNTS=""   # rows of "repo<TAB>count"
+
+_lhs_ic_get() {   # $1=repo -> prints its count, or 0 if absent
+  printf '%s\n' "$ISSUE_COUNTS" \
+    | awk -F'\t' -v r="$1" '$1==r{c=$2; found=1} END{print (found ? c : 0)}'
+}
+_lhs_ic_incr() {  # $1=repo -> increment its count by 1
+  local cur rest
+  cur=$(_lhs_ic_get "$1")
+  # Drop any existing row for this repo. Guard the empty case so we do not
+  # feed awk a lone blank record (which would echo back an empty row).
+  if [ -n "$ISSUE_COUNTS" ]; then
+    rest=$(printf '%s\n' "$ISSUE_COUNTS" | awk -F'\t' -v r="$1" '$1!=r')
+  else
+    rest=""
+  fi
+  # Append the new count, keeping the accumulator free of leading blank rows.
+  if [ -n "$rest" ]; then
+    ISSUE_COUNTS="${rest}
+$1	$(( cur + 1 ))"
+  else
+    ISSUE_COUNTS="$1	$(( cur + 1 ))"
+  fi
+}
+
 if [ -n "$issue_search" ]; then
   while IFS= read -r r; do
-    ISSUE_COUNTS["$r"]=$(( ${ISSUE_COUNTS["$r"]:-0} + 1 ))
+    _lhs_ic_incr "$r"
   done <<< "$issue_search"
 fi
 
@@ -403,7 +430,7 @@ if [ -n "$repo_breakdown" ]; then
     short=$(echo "$repo" | cut -d/ -f2)
     int_count=$(echo "$row" | jq -r '.internal')
     ext_count=$(echo "$row" | jq -r '.external')
-    issue_count=${ISSUE_COUNTS["$repo"]:-0}
+    issue_count=$(_lhs_ic_get "$repo")
     REPO_TABLE="${REPO_TABLE}| ${short} | ${int_count} | ${ext_count} | ${issue_count} |
 "
   done < <(echo "$repo_breakdown" | jq -c '.')
