@@ -36,7 +36,7 @@ jobs:
           for t in tests/test-lib-inventory.sh tests/test-lib-modules.sh \
                    tests/test-core-repos.sh tests/test-org-profile.sh \
                    tests/test-extract-broken-links.sh tests/test-parse-diff-map.sh \
-                   tests/test-pr-review-impact.sh; do
+                   tests/test-pr-review-impact.sh tests/test-weekly-report.sh; do
             echo "== $t =="
             bash "$t"
           done
