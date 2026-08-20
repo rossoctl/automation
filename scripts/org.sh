@@ -72,11 +72,13 @@ validate_repos_dir() {
 # derive their repo set from config/core-repos.txt via get_core_repos(), so
 # coverage is defined in one place rather than hardcoded per script.
 #
-# The on-disk clone directories still carry pre-rename names (e.g. "kagenti",
-# "kagenti-extensions"), so scripts that iterate clones must map a directory
-# basename to its canonical repo via canonical_repo_for_dir() before building
-# an API reference. Never rely on the rename redirect for filtered `gh pr list`
-# queries (--label/--author silently return empty across a redirect).
+# Scripts that iterate clones map each directory basename to its canonical repo
+# via canonical_repo_for_dir() before building an API reference. That mapping is
+# now identity for the rossoctl deployment (clone dirs are canonically named; the
+# transitional remap has been retired), but the call stays so any future org
+# whose clone dirs are mis-named can re-enable it via PROFILE_REMAP. Never rely
+# on the rename redirect for filtered `gh pr list` queries (--label/--author
+# silently return empty across a redirect).
 
 # Load org identity from a profile file and resolve each fact by precedence:
 #   --flag > env var > profile value > built-in default.
@@ -225,17 +227,19 @@ is_core_repo() {
 
 # Map a local clone directory basename to its canonical bare repo name.
 #
-# Clone dirs may still use pre-rename names; the remap table lives in the org
-# profile's $REMAP (format: space-separated "basename:canonical" pairs, set by
-# load_org_profile), so every script agrees and the mapping is data, not code.
-# An empty $REMAP makes this pure identity; unknown names pass through
-# unchanged (identity), so non-remapped repos need no special handling.
+# When a clone dir's basename differs from its canonical repo name (e.g. after
+# an org rename, before the dir is renamed), the remap table maps one to the
+# other. It lives in the org profile's $REMAP (format: space-separated
+# "basename:canonical" pairs, set by load_org_profile), so every script agrees
+# and the mapping is data, not code. An empty $REMAP makes this pure identity;
+# unknown names pass through unchanged (identity), so non-remapped repos need no
+# special handling.
 #
-# TRANSITIONAL: $REMAP is a temporary bridge for the kagenti->rossoctl rename
-# while stale-named clone dirs still exist on disk. Once clone dirs are renamed
-# to canonical names, the PROFILE_REMAP line is deleted and this becomes pure
-# identity. See rossoctl/automation#37. It is a lookup table, not a rename
-# detector -- do not treat it as protection against future renames.
+# $REMAP is currently empty in the shipped rossoctl profile: the kagenti->rossoctl
+# clone dirs have been renamed/removed, so this resolves to identity. The table is
+# a transitional bridge, not a rename detector -- populate PROFILE_REMAP only
+# while mis-named clone dirs exist on disk, and clear it once they are corrected.
+# Do not treat it as protection against future renames.
 #
 # A malformed entry (no colon) is skipped with a warning, non-fatal.
 #
