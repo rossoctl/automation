@@ -21,3 +21,4 @@ cortex
 examples
 operator
 workload-harness
+context-service
