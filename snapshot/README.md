@@ -9,11 +9,12 @@ produced into one dated directory:
 
 ```
 openclaw-snapshot-YYYY-MM-DD/
-├── state.tar.gz     # openclaw backup create --verify output
-├── secrets.age      # age-encrypted host-level secrets (never plaintext on disk)
-├── manifest.json    # versions, service unit, gateway port, per-core-repo git state
-├── RUNBOOK.md       # ordered restore steps, generated from the manifest
-└── age              # self-contained static binary, so restore can decrypt unaided
+├── <ISO8601>-openclaw-backup.tar.gz  # openclaw backup create --verify output
+├── state-backup.json                 # the backup's machine-readable result
+├── secrets.age                       # age-encrypted host-level secrets (never plaintext on disk)
+├── manifest.json                     # versions, service unit, gateway port, per-core-repo git state
+├── RUNBOOK.md                        # ordered restore steps, generated from the manifest
+└── age                               # static binary copied in, so restore can decrypt unaided
 ```
 
 ## Contracts
@@ -78,15 +79,98 @@ keypair. The private key never touches any VM.
 
 ```sh
 # One-time, on the operator's machine only. Private key stays here (or a password manager).
-age-keygen -o ~/openclaw-snapshot.key
+age-keygen -o ~/.openclaw-snapshot.key
 # Prints the PUBLIC key (age1...) to stdout; record it. The file holds the PRIVATE key.
 
 # Capture time (host holds only the public key — encrypt-only capability):
 age -r age1<PUBLIC> < plaintext > secrets.age     # snapshot-secrets.sh does this via a tar pipe
 
 # Restore time (operator supplies the private key):
-age -d -i ~/openclaw-snapshot.key < secrets.age > plaintext
+age -d -i ~/.openclaw-snapshot.key < secrets.age > plaintext
 ```
 
-`age` is not assumed present on any host, so the toolkit ships a self-contained static
-`age` binary in `snapshot/bin/age` and rides a copy along in each snapshot directory.
+The private key is saved as a **dotfile** (`~/.openclaw-snapshot.key`), which keeps it out
+of casual directory listings and reduces the chance another agent on the machine reads it.
+It is never copied to a VM, committed to this repo, or passed through any tooling.
+
+`age` is not assumed present on any host, and the static binary is **not committed** to this
+repo (to keep the tree binary-free). Fetch it once and drop it at `snapshot/bin/age`; the
+capture driver copies that binary into each snapshot directory so restore can decrypt unaided.
+
+---
+
+## Operator guide
+
+### 1. Generate the keypair (one-time, off-host)
+
+```sh
+age-keygen -o ~/.openclaw-snapshot.key      # PRIVATE key — never leaves this machine
+# stdout prints:  Public key: age1<PUBLIC>  — record this; it is all the host needs.
+```
+
+If `age-keygen` is missing locally, install `age` (`brew install age`, `apt-get install age`,
+or the release below) — it provides both `age` and `age-keygen`.
+
+### 2. Provision the `age` binary at `snapshot/bin/age`
+
+The host (`x86_64` Linux) has no `age`. Fetch the static release binary, verify its
+checksum, and place it — no `sudo` needed:
+
+```sh
+# Pick the asset matching the host arch (linux-amd64 for the current host).
+ver=v1.3.2
+curl -fsSLO "https://github.com/FiloSottile/age/releases/download/${ver}/age-${ver}-linux-amd64.tar.gz"
+# Record the SHA-256 of what you downloaded, and pin it in your ops notes so a
+# future re-fetch can be checked against it:
+sha256sum "age-${ver}-linux-amd64.tar.gz"
+tar -xzf "age-${ver}-linux-amd64.tar.gz"
+install -m 0755 age/age snapshot/bin/age
+snapshot/bin/age --version                  # sanity check
+```
+
+> The `age` releases publish a per-asset `.proof` (Sigsum transparency proof) rather than a
+> combined checksums file; upstream verification instructions are in the release notes. Pin
+> the exact release tag and the SHA-256 you recorded above in your ops notes, and re-pin when
+> upgrading `age`. The binary is intentionally not tracked in git.
+
+### 3. Capture on the host
+
+```sh
+AGE_BIN=snapshot/bin/age \
+  bash snapshot/snapshot.sh --output ~/snapshots --pubkey age1<PUBLIC>
+```
+
+This creates `~/snapshots/openclaw-snapshot-<DATE>/` (refusing to overwrite an existing one),
+runs the manifest, state, and secrets captures into it, and copies the `age` binary alongside.
+The `openclaw` binary lives at `~/.npm-global/bin/openclaw`; set `OPENCLAW_BIN` if it is not on
+`PATH` for the invoking shell.
+
+### 4. Confirm no plaintext leaked into `secrets.age`
+
+`strings` may be absent on a minimal host. Check the encrypted blob directly for a known
+secret substring using `grep -a` (treat the binary as text). A real `age` blob is encrypted,
+so nothing should match:
+
+```sh
+snap=$(ls -d ~/snapshots/openclaw-snapshot-*/ | tail -1)
+# The blob must start with the age header and contain none of your secrets:
+head -c 64 "$snap/secrets.age"; echo
+grep -a -c -i -e 'authToken' -e 'BEGIN .*PRIVATE KEY' "$snap/secrets.age"   # expect: 0
+```
+
+### 5. Verify the state archive
+
+```sh
+~/.npm-global/bin/openclaw backup verify "$snap"/*openclaw-backup.tar.gz
+```
+
+### 6. Dry-run the restore (no mutations)
+
+```sh
+bash snapshot/restore.sh --from "$snap" --dry-run
+```
+
+Eyeball the plan: the captured OpenClaw version, each core repo cloned from its **recorded
+origin** (origins span multiple owners — e.g. `kagenti/*` and `rossoctl/*` — so the recorded
+origin, not a single org, is authoritative) at its recorded branch, the service unit, and an
+`openclaw backup verify` step. The dry-run creates nothing.
