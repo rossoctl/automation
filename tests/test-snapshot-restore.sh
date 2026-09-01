@@ -144,8 +144,59 @@ if (
   fail=1
 fi
 
+# Injection safety: a manifest whose origin carries a shell-injection payload
+# must NOT execute that payload during a REAL (non-dry-run) restore. emit runs
+# its words via "$@", so metacharacters in a manifest field are inert data, not
+# code. We stub every command the real path would invoke so nothing mutates the
+# host, drop a sentinel canary, and require it to remain absent.
+INJ_SNAP="$TEST_TMPDIR/inj-snap"
+mkdir -p "$INJ_SNAP"
+: > "$INJ_SNAP/age"
+: > "$INJ_SNAP/secrets.age"
+: > "$INJ_SNAP/state.tar.gz"
+CANARY="$TEST_TMPDIR/pwned"
+# The origin tries to break out of a clone and touch the canary file.
+PAYLOAD="https://x/r.git'; touch $CANARY; echo '"
+cat > "$INJ_SNAP/manifest.json" <<EOF
+{
+  "openclawVersion": "2026.5.12",
+  "nodeVersion": "v22.22.2",
+  "gatewayPort": 18789,
+  "serviceUnit": "openclaw-gateway.service",
+  "repos": [
+    { "name": "evil", "origin": "$PAYLOAD", "branch": "main", "dirty": false, "unpushed": false }
+  ]
+}
+EOF
+
+# Stub the mutating commands the real restore would run, so the test host is
+# untouched regardless of the fix. install/tar/openclaw/systemctl are stubbed to
+# no-ops; git is stubbed to record args without doing anything.
+INJ_BIN="$TEST_TMPDIR/inj-bin"
+mkdir -p "$INJ_BIN"
+for c in install tar openclaw systemctl git age; do
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$INJ_BIN/$c"
+  chmod +x "$INJ_BIN/$c"
+done
+
+# Run the REAL restore (no --dry-run) with stubs on PATH and AGE_IDENTITY set so
+# the pipeline step has an identity value. Tolerate a nonzero exit.
+(
+  PATH="$INJ_BIN:$PATH" \
+  AGE_IDENTITY="/dev/null" \
+  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
+  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOS_DIR="$REPOS_DIR" \
+  bash "$RESTORE_SH" --from "$INJ_SNAP"
+) >/dev/null 2>&1 || true
+
+if [ -e "$CANARY" ]; then
+  echo "FAIL restore: shell injection from a manifest origin EXECUTED (canary created)"
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
-  echo "PASS: snapshot-restore (dry-run plan: recorded-origin clone, \$ORG fallback, verify-not-restore)"
+  echo "PASS: snapshot-restore (dry-run plan: recorded-origin clone, \$ORG fallback, verify-not-restore, injection-safe)"
 else
   exit 1
 fi

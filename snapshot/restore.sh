@@ -74,11 +74,35 @@ validate_repos_dir "$REPOS_DIR"
 # emit: in dry-run, print the step; otherwise execute it. Keeping the two modes
 # behind one helper means the plan the operator reviews is exactly the sequence
 # that runs for real -- no drift between "what it says" and "what it does".
+#
+# Each argument is one argv word -- callers pass the command and its arguments
+# as SEPARATE words, never a single pre-quoted string. Execution is `"$@"`, so
+# the shell never re-parses the words: a manifest-derived value such as a repo
+# origin or path cannot inject shell metacharacters (no `eval`). In dry-run we
+# print with `printf '%q'` so the shown words are safely quoted and copy-paste
+# faithful. A step that genuinely needs a shell pipeline uses emit_pipeline.
 emit() {
   if [ "$DRY_RUN" -eq 1 ]; then
-    printf '  %s\n' "$*"
+    printf '  '
+    printf '%q ' "$@"
+    printf '\n'
   else
-    eval "$*"
+    "$@"
+  fi
+}
+
+# emit_pipeline: like emit, but for the one step that is inherently a shell
+# pipeline (decrypt | untar). It takes a fixed command STRING that must contain
+# NO caller/manifest-derived data -- only literals and controlled environment
+# variables ($AGE_IDENTITY, $FROM, $HOME) that are not attacker-influenced. In
+# dry-run it prints the string; for real it runs it under `bash -c`. Keeping the
+# eval-like path in its own helper, fed only trusted literals, means the general
+# emit path stays injection-proof.
+emit_pipeline() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '  %s\n' "$1"
+  else
+    bash -c "$1"
   fi
 }
 
@@ -107,23 +131,26 @@ fi
 
 # 1. Bootstrap the bundled age binary (so decrypt works without system age).
 echo "Step 1: bootstrap age"
-emit "install -m 0755 '$FROM/age' /usr/local/bin/age"
+emit install -m 0755 "$FROM/age" /usr/local/bin/age
 
-# 2. Install the pinned OpenClaw + node versions.
+# 2. Install the pinned OpenClaw + node versions. This is a manual/host-specific
+#    step (package manager, npm, etc.), so it is described rather than executed.
 echo "Step 2: install OpenClaw $openclaw_version (node $node_version)"
-emit "echo 'install openclaw@$openclaw_version node@$node_version'"
+echo "  install openclaw@$openclaw_version and node@$node_version by your host's usual method"
 
 # 3. Decrypt the secrets bundle with the operator's PRIVATE key (supplied out of
 #    band; never stored in the snapshot). Names-only -- no contents printed.
+#    This is the one inherently-piped step; its command string contains only
+#    $FROM and controlled env vars, never manifest-derived data.
 echo "Step 3: decrypt secrets.age"
-emit "age -d -i \"\$AGE_IDENTITY\" '$FROM/secrets.age' | tar -C \"\$HOME\" -xf -"
+emit_pipeline "age -d -i \"\$AGE_IDENTITY\" '$FROM/secrets.age' | tar -C \"\$HOME\" -xf -"
 
 # 4. Restore state: extract the archive in place, then VERIFY it. There is no
 #    `openclaw backup restore` subcommand.
 echo "Step 4: restore + verify OpenClaw state"
 if [ -n "$state_archive" ]; then
-  emit "tar -C \"\$HOME\" -xzf '$state_archive'"
-  emit "openclaw backup verify '$state_archive'"
+  emit tar -C "$HOME" -xzf "$state_archive"
+  emit openclaw backup verify "$state_archive"
 else
   echo "  WARNING: no state archive found in $FROM (looked for *openclaw-backup.tar.gz / state.tar.gz)" >&2
 fi
@@ -149,8 +176,8 @@ while [ "$i" -lt "$repo_count" ]; do
   fi
 
   target="$REPOS_DIR/$r_name"
-  emit "git clone '$clone_url' '$target'"
-  emit "git -C '$target' checkout '$r_branch'"
+  emit git clone "$clone_url" "$target"
+  emit git -C "$target" checkout "$r_branch"
   if [ "$r_dirty" = "true" ]; then
     echo "  NOTE: $r_name had uncommitted changes at capture; re-apply its patch manually" >&2
   fi
@@ -160,11 +187,12 @@ done
 
 # 6. Install and enable the service unit; start the gateway.
 echo "Step 6: enable service unit $service_unit"
-emit "systemctl --user enable --now '$service_unit'"
+emit systemctl --user enable --now "$service_unit"
 
-# 7. Verify the running host against the captured manifest.
+# 7. Verify the running host against the captured manifest. A manual check, so
+#    it is described rather than executed.
 echo "Step 7: verify"
-emit "echo 'verify: compare cron count and agent list against $MANIFEST'"
+echo "  verify: compare cron count and agent list against $MANIFEST"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Dry-run complete: no changes made."
