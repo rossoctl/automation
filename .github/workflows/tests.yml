@@ -30,13 +30,23 @@ jobs:
         # pre-existing SC2034 arg-parsing idiom tracked separately; see the
         # consumer-lint follow-up issue.
         run: shellcheck --severity=warning scripts/core.sh scripts/github-api.sh scripts/fork.sh scripts/org.sh scripts/program-lib.sh
+      - name: shellcheck (snapshot toolkit)
+        # The snapshot scripts + their tests are clean at warning severity (they
+        # avoid the consumer SC2034 idiom), so lint them as their own group.
+        run: shellcheck --severity=warning snapshot/*.sh tests/test-lib-snapshot.sh tests/test-snapshot-*.sh
       - name: Run test suite
+        # NOTE: this list and the shellcheck lists above are EXPLICIT, not globs.
+        # A new test file must be added here (and to the relevant shellcheck
+        # step) or it silently never runs in CI.
         run: |
           set -e
           for t in tests/test-lib-inventory.sh tests/test-lib-modules.sh \
                    tests/test-core-repos.sh tests/test-org-profile.sh \
                    tests/test-extract-broken-links.sh tests/test-parse-diff-map.sh \
-                   tests/test-pr-review-impact.sh tests/test-weekly-report.sh; do
+                   tests/test-pr-review-impact.sh tests/test-weekly-report.sh \
+                   tests/test-lib-snapshot.sh tests/test-snapshot-manifest.sh \
+                   tests/test-snapshot-secrets.sh tests/test-snapshot-state.sh \
+                   tests/test-snapshot-driver.sh tests/test-snapshot-restore.sh; do
             echo "== $t =="
             bash "$t"
           done
