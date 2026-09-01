@@ -123,6 +123,8 @@ curl -fsSLO "https://github.com/FiloSottile/age/releases/download/${ver}/age-${v
 # Record the SHA-256 of what you downloaded, and pin it in your ops notes so a
 # future re-fetch can be checked against it:
 sha256sum "age-${ver}-linux-amd64.tar.gz"
+# Verified 2026-08-31 for v1.3.2 linux-amd64:
+#   cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10
 tar -xzf "age-${ver}-linux-amd64.tar.gz"
 install -m 0755 age/age snapshot/bin/age
 snapshot/bin/age --version                  # sanity check

@@ -80,17 +80,28 @@ fi
 
 mkdir -p "$SNAP_DIR"
 
+# Invoke the sibling capture scripts through `bash` rather than executing them
+# directly. They are bash scripts with a bash shebang, so this is equivalent --
+# but it does NOT depend on the execute bit surviving. A fresh `git clone`, or a
+# tarball repacked without preserving mode, can land these scripts as mode 0644;
+# invoking `"$CMD"` there fails with "Permission denied", while `bash "$CMD"`
+# works regardless. (Test seams may still point at executable stubs; bash runs
+# those fine too.)
+run_capture() {
+  bash "$@"
+}
+
 # Capture runtime facts + per-repo git state (manifest.json + RUNBOOK.md).
 echo "==> manifest"
-"$MANIFEST_CMD" --outdir "$SNAP_DIR"
+run_capture "$MANIFEST_CMD" --outdir "$SNAP_DIR"
 
 # Capture the authoritative OpenClaw state via the first-class backup.
 echo "==> state"
-"$STATE_CMD" --outdir "$SNAP_DIR"
+run_capture "$STATE_CMD" --outdir "$SNAP_DIR"
 
 # Capture host secrets into a single age-encrypted blob.
 echo "==> secrets"
-"$SECRETS_CMD" --outdir "$SNAP_DIR" --pubkey "$PUBKEY"
+run_capture "$SECRETS_CMD" --outdir "$SNAP_DIR" --pubkey "$PUBKEY"
 
 # Bundle the age binary so decrypt/restore works on a VM without age installed.
 # Only warn (do not fail) if the source is absent: the state + manifest are

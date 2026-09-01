@@ -131,6 +131,30 @@ if [ ! -x "$EXPECTED_DIR/age" ]; then
   fail=1
 fi
 
+# Regression (portability): the driver must invoke the capture scripts even when
+# they are NOT executable. git can track scripts as mode 0644, and a tarball may
+# be repacked without preserving the execute bit -- both happened on the real
+# host, where directly executing a 0644 script failed with "Permission denied".
+# Point the seams at non-executable copies and require a clean capture anyway.
+NX_BIN="$TEST_TMPDIR/stubs-noexec"
+mkdir -p "$NX_BIN"
+cp "$STUB_BIN/state" "$NX_BIN/state"
+cp "$STUB_BIN/manifest" "$NX_BIN/manifest"
+cp "$STUB_BIN/secrets" "$NX_BIN/secrets"
+chmod -x "$NX_BIN/state" "$NX_BIN/manifest" "$NX_BIN/secrets"
+NX_DATE="2026-01-03"
+NX_DIR="$OUTPUT/openclaw-snapshot-$NX_DATE"
+SNAPSHOT_DATE="$NX_DATE" \
+SNAPSHOT_STATE_CMD="$NX_BIN/state" \
+SNAPSHOT_MANIFEST_CMD="$NX_BIN/manifest" \
+SNAPSHOT_SECRETS_CMD="$NX_BIN/secrets" \
+AGE_BIN_SRC="$AGE_SRC" \
+bash "$DRIVER_SH" --output "$OUTPUT" --pubkey "$PUBKEY" >/dev/null 2>&1 || true
+if [ ! -f "$NX_DIR/.manifest-ran" ] || [ ! -f "$NX_DIR/.state-ran" ] || [ ! -f "$NX_DIR/.secrets-pubkey" ]; then
+  echo "FAIL driver: capture failed when scripts were non-executable (portability regression)"
+  fail=1
+fi
+
 # Second run against the same date must REFUSE to overwrite (non-zero).
 if run_driver >/dev/null 2>&1; then
   echo "FAIL driver: second run should refuse to overwrite existing dated dir"
