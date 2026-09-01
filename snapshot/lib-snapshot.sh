@@ -36,11 +36,11 @@ snapshot_secret_paths() {
   # discovers secrets automatically -- to capture a newly added secret file, add
   # its path here, or capture will silently omit it.
   local candidates=(
-    ".openclaw/.env"
-    ".openclaw/gateway.systemd.env"
-    ".npmrc"
-    "new_pat.txt"
-    ".ssh/id_ecdsa"
+    ".openclaw/.env"                 # OpenClaw runtime env (API keys, tokens)
+    ".openclaw/gateway.systemd.env"  # env file the gateway systemd unit reads
+    ".npmrc"                         # npm registry auth (may hold a token)
+    "new_pat.txt"                    # stored GitHub PAT used by the automation
+    ".ssh/id_ecdsa"                  # SSH private key for git remote access
   )
 
   # Emit only the candidates that actually exist as regular files.
