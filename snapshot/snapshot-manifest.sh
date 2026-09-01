@@ -105,6 +105,10 @@ while IFS= read -r name; do
   fi
 
   # Append this repo as a JSON object. jq handles all string escaping.
+  # NOTE: re-encoding the whole array each iteration (`. + [$obj]`) is O(n^2),
+  # but the core-repo count is tiny (single digits) and letting jq own every
+  # append keeps all escaping correct. Don't "optimize" this into shell string
+  # concatenation -- that reintroduces the escaping bugs jq is here to avoid.
   repo_obj=$(jq -n \
     --arg name "$name" \
     --arg origin "$origin" \

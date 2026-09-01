@@ -35,6 +35,9 @@ jobs:
         # avoid the consumer SC2034 idiom), so lint them as their own group.
         run: shellcheck --severity=warning snapshot/*.sh tests/test-lib-snapshot.sh tests/test-snapshot-*.sh
       - name: Run test suite
+        # NOTE: this list and the shellcheck lists above are EXPLICIT, not globs.
+        # A new test file must be added here (and to the relevant shellcheck
+        # step) or it silently never runs in CI.
         run: |
           set -e
           for t in tests/test-lib-inventory.sh tests/test-lib-modules.sh \

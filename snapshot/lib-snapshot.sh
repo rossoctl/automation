@@ -32,6 +32,9 @@ snapshot_secret_paths() {
   local base="${SNAPSHOT_HOME:-$HOME}"
 
   # Candidate secret files, relative to the base home directory.
+  # MAINTAINERS: this array is the whole secret-capture allowlist. Nothing else
+  # discovers secrets automatically -- to capture a newly added secret file, add
+  # its path here, or capture will silently omit it.
   local candidates=(
     ".openclaw/.env"
     ".openclaw/gateway.systemd.env"

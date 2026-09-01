@@ -176,3 +176,50 @@ Eyeball the plan: the captured OpenClaw version, each core repo cloned from its 
 origin** (origins span multiple owners — e.g. `kagenti/*` and `rossoctl/*` — so the recorded
 origin, not a single org, is authoritative) at its recorded branch, the service unit, and an
 `openclaw backup verify` step. The dry-run creates nothing.
+
+---
+
+## Maintainer reference
+
+### Environment variables
+
+Every external dependency is an overridable environment variable (a "seam"), so
+the scripts stay hermetically testable. Defaults are what production uses; tests
+point these at fixtures.
+
+| Variable | Default | Purpose | Used by |
+|----------|---------|---------|---------|
+| `REPOS_DIR` | from org profile | Where core-repo clones live | manifest, restore |
+| `OPENCLAW_BIN` | `openclaw` | Path to the `openclaw` binary | state, manifest (via lib) |
+| `NODE_BIN` | `node` | Path to the `node` binary | manifest (via lib) |
+| `SNAPSHOT_HOME` | `$HOME` | Base dir for the secret-file allowlist | secrets, lib |
+| `GATEWAY_PORT` | `18789` | Gateway port recorded in the manifest | manifest |
+| `SERVICE_UNIT` | `openclaw-gateway.service` | systemd unit recorded in the manifest | manifest, restore |
+| `AGE_BIN` | `age` | Path to the `age` binary (encrypt/decrypt) | secrets |
+| `AGE_BIN_SRC` | `snapshot/bin/age` | `age` binary bundled into the snapshot | driver |
+| `SNAPSHOT_DATE` | `date +%F` | Overrides the dated dir name (tests only) | driver |
+| `SNAPSHOT_STATE_CMD` / `SNAPSHOT_SECRETS_CMD` / `SNAPSHOT_MANIFEST_CMD` | the sibling scripts | Substitute capture steps (tests only) | driver |
+
+### The secret allowlist is the thing to keep current
+
+The list of host secret files to capture is hardcoded in
+`snapshot/lib-snapshot.sh` (`snapshot_secret_paths`, the `candidates` array).
+**To capture a newly added secret file, add its path to that array** — nothing
+else discovers secrets automatically. If OpenClaw starts writing a new
+credential file and it is not in that list, capture silently omits it.
+
+### Running the tests
+
+The scripts target **bash 3.2** (macOS default) — avoid bash-4-only features.
+Run the suite and the linter exactly as CI does:
+
+```sh
+for t in tests/test-lib-snapshot.sh tests/test-snapshot-*.sh; do
+  echo "== $t =="; bash "$t"
+done
+shellcheck --severity=warning snapshot/*.sh tests/test-lib-snapshot.sh tests/test-snapshot-*.sh
+```
+
+> **Adding a test?** CI (`.github/workflows/tests.yml`) uses explicit file
+> lists, not globs. A new test file must be added to **both** the shellcheck
+> step and the run-suite loop there, or it silently never runs.
