@@ -56,6 +56,11 @@ git init -q "$REPOS_DIR/tool-one"
 git init -q "$REPOS_DIR/tool-two"
 (
   cd "$REPOS_DIR/tool-two"
+  # Pin the branch to 'main' explicitly. A bare `git init` uses the host's
+  # init.defaultBranch, which is 'master' on GitHub Actions runners -- the
+  # manifest would then record 'master' and the checkout assertion below would
+  # fail on CI while passing on a dev box configured for 'main'.
+  git checkout -q -b main
   git config user.email "t@example.com"
   git config user.name "t"
   echo "world" > file.txt
