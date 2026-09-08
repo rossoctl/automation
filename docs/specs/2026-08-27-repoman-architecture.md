@@ -266,6 +266,12 @@ hardcoded paths to `link-scan/latest.json` and `dep-bump/latest.json`. Under Rep
 appears in `_index.json` and the dashboard picks it up on the next run, with no hardcoded path
 changes needed.
 
+Note that the report directory `link-scan` is intentionally renamed to `link-health` under
+RepoMan (the name used throughout the invocation flow, the state diagram, and the `_index.json`
+`report_path`). The `link-scan` path above is the current on-disk name, so an implementer
+migrating the dashboard to the `_index.json` lookup should treat the mismatch as this planned
+rename and not as an oversight.
+
 ## Deployment
 
 ```
