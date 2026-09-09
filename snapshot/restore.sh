@@ -93,11 +93,14 @@ emit() {
 
 # emit_pipeline: like emit, but for the one step that is inherently a shell
 # pipeline (decrypt | untar). It takes a fixed command STRING that must contain
-# NO caller/manifest-derived data -- only literals and controlled environment
-# variables ($AGE_IDENTITY, $FROM, $HOME) that are not attacker-influenced. In
-# dry-run it prints the string; for real it runs it under `bash -c`. Keeping the
-# eval-like path in its own helper, fed only trusted literals, means the general
-# emit path stays injection-proof.
+# NO caller/manifest-derived data -- only literals and deferred references to
+# controlled environment variables ($AGE_IDENTITY, $HOME, $SECRETS_BLOB) written
+# as `"$VAR"` so the shell expands them at run time inside `bash -c`. Because no
+# value is spliced into the string at build time, a path containing shell
+# metacharacters (even a single quote) stays inert. In dry-run it prints the
+# string; for real it runs it under `bash -c`. Keeping the eval-like path in its
+# own helper, fed only literals + deferred vars, means the general emit path
+# stays injection-proof.
 emit_pipeline() {
   if [ "$DRY_RUN" -eq 1 ]; then
     printf '  %s\n' "$1"
@@ -140,10 +143,13 @@ echo "  install openclaw@$openclaw_version and node@$node_version by your host's
 
 # 3. Decrypt the secrets bundle with the operator's PRIVATE key (supplied out of
 #    band; never stored in the snapshot). Names-only -- no contents printed.
-#    This is the one inherently-piped step; its command string contains only
-#    $FROM and controlled env vars, never manifest-derived data.
+#    This is the one inherently-piped step. The snapshot path is passed through
+#    the environment ($SECRETS_BLOB) and dereferenced as "$SECRETS_BLOB" inside
+#    the pipeline, so nothing is spliced into the command string at build time --
+#    a path with shell metacharacters stays inert, like $AGE_IDENTITY/$HOME.
 echo "Step 3: decrypt secrets.age"
-emit_pipeline "age -d -i \"\$AGE_IDENTITY\" '$FROM/secrets.age' | tar -C \"\$HOME\" -xf -"
+SECRETS_BLOB="$FROM/secrets.age" emit_pipeline \
+  'age -d -i "$AGE_IDENTITY" "$SECRETS_BLOB" | tar -C "$HOME" -xf -'
 
 # 4. Restore state: extract the archive in place, then VERIFY it. There is no
 #    `openclaw backup restore` subcommand.

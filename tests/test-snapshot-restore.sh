@@ -195,6 +195,41 @@ if [ -e "$CANARY" ]; then
   fail=1
 fi
 
+# Path-injection safety for the ONE pipeline step (decrypt | untar). The snapshot
+# path reaches emit_pipeline via $SECRETS_BLOB and is dereferenced as
+# "$SECRETS_BLOB" at run time, so a --from dir whose name contains a single quote
+# must NOT break out of the pipeline and execute. Build such a dir, seed a canary
+# payload in its name, stub the mutators, run a REAL restore, require no canary.
+Q_CANARY="$TEST_TMPDIR/pwned-path"
+Q_SNAP="$TEST_TMPDIR/q'; touch $Q_CANARY; :"
+mkdir -p "$Q_SNAP"
+: > "$Q_SNAP/age"
+: > "$Q_SNAP/secrets.age"
+: > "$Q_SNAP/state.tar.gz"
+cat > "$Q_SNAP/manifest.json" <<'EOF'
+{
+  "openclawVersion": "2026.5.12",
+  "nodeVersion": "v22.22.2",
+  "gatewayPort": 18789,
+  "serviceUnit": "openclaw-gateway.service",
+  "repos": []
+}
+EOF
+
+(
+  PATH="$INJ_BIN:$PATH" \
+  AGE_IDENTITY="/dev/null" \
+  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
+  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOS_DIR="$REPOS_DIR" \
+  bash "$RESTORE_SH" --from "$Q_SNAP"
+) >/dev/null 2>&1 || true
+
+if [ -e "$Q_CANARY" ]; then
+  echo "FAIL restore: single-quote in --from path broke out of the decrypt pipeline (canary created)"
+  fail=1
+fi
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS: snapshot-restore (dry-run plan: recorded-origin clone, \$ORG fallback, verify-not-restore, injection-safe)"
 else
