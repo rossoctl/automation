@@ -1,0 +1,39 @@
+{
+  "createdAt": "2026-01-01T00-00-00.000Z",
+  "archiveRoot": "2026-01-01T00-00-00.000Z-openclaw-backup",
+  "archivePath": "/home/acme/2026-01-01T00-00-00.000Z-openclaw-backup.tar.gz",
+  "dryRun": true,
+  "includeWorkspace": true,
+  "onlyConfig": false,
+  "verified": false,
+  "assets": [
+    {
+      "kind": "state",
+      "sourcePath": "/home/acme/.openclaw",
+      "displayPath": "~/.openclaw",
+      "archivePath": "2026-01-01T00-00-00.000Z-openclaw-backup/payload/posix/home/acme/.openclaw"
+    },
+    {
+      "kind": "workspace",
+      "sourcePath": "/home/acme/workspaces/main",
+      "displayPath": "~/workspaces/main",
+      "archivePath": "2026-01-01T00-00-00.000Z-openclaw-backup/payload/posix/home/acme/workspaces/main"
+    },
+    {
+      "kind": "workspace",
+      "sourcePath": "/home/acme/workspaces/dev",
+      "displayPath": "~/workspaces/dev",
+      "archivePath": "2026-01-01T00-00-00.000Z-openclaw-backup/payload/posix/home/acme/workspaces/dev"
+    }
+  ],
+  "skipped": [
+    {
+      "kind": "workspace",
+      "sourcePath": "/home/acme/.openclaw/workspace",
+      "displayPath": "~/.openclaw/workspace",
+      "reason": "covered",
+      "coveredBy": "~/.openclaw"
+    }
+  ],
+  "skippedVolatileCount": 0
+}
