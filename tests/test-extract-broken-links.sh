@@ -106,19 +106,21 @@ run_test "external repo emitted verbatim" "$TEST_TMPDIR/ext.json" '.[0].repo' 'r
 run_test "external file prefix stripped" "$TEST_TMPDIR/ext.json" '.[0].file' 'docs/d.md'
 run_test "external url preserved" "$TEST_TMPDIR/ext.json" '.[0].url' 'https://example.invalid/gone'
 
-echo "Test 6: kagenti GitHub URL is category internal"
-write_fixture "$TEST_TMPDIR/int.json" \
-  "docs/e.md" \
-  "https://github.com/kagenti/kagenti/blob/main/missing.md" \
-  '{"code":404}'
-run_test "internal category" "$TEST_TMPDIR/int.json" '.[0].category' 'internal'
-
-echo "Test 6b: rossoctl GitHub URL is category internal (post-rename)"
+# "internal" means "same owner as the repo being scanned" ($REPO owner is
+# rossoctl), so it follows the enrolled owner rather than a hardcoded org list.
+echo "Test 6: GitHub URL under the scanned repo's own owner is category internal"
 write_fixture "$TEST_TMPDIR/int-rossoctl.json" \
-  "docs/e2.md" \
+  "docs/e.md" \
   "https://github.com/rossoctl/rossoctl/blob/main/missing.md" \
   '{"code":404}'
-run_test "internal category (rossoctl)" "$TEST_TMPDIR/int-rossoctl.json" '.[0].category' 'internal'
+run_test "internal category (same owner)" "$TEST_TMPDIR/int-rossoctl.json" '.[0].category' 'internal'
+
+echo "Test 6b: GitHub URL under a different owner is category external"
+write_fixture "$TEST_TMPDIR/ext-otherowner.json" \
+  "docs/e2.md" \
+  "https://github.com/kagenti/kagenti/blob/main/missing.md" \
+  '{"code":404}'
+run_test "external category (different owner)" "$TEST_TMPDIR/ext-otherowner.json" '.[0].category' 'external'
 
 echo "Test 7: text status normalized to unreachable"
 write_fixture "$TEST_TMPDIR/unreach.json" \

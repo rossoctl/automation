@@ -113,7 +113,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   esac
   SEEN_CANON="$SEEN_CANON $canon"
 
-  echo "Scanning $repo_name (as rossoctl/$canon)..."
+  echo "Scanning $repo_name (as $ORG/$canon)..."
 
   LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
 
@@ -155,7 +155,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   # normalization logic lives in extract-broken-links.sh so it can be unit-tested
   # (see tests/test-extract-broken-links.sh).
   "$SCRIPT_DIR/extract-broken-links.sh" \
-    "$LYCHEE_OUTPUT" "rossoctl/$canon" "$REPOS_DIR/$repo_name/" \
+    "$LYCHEE_OUTPUT" "$ORG/$canon" "$REPOS_DIR/$repo_name/" \
     >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
 
   echo "  Links: $repo_total, Errors: $repo_errors"
@@ -381,7 +381,7 @@ TREND_TABLE=$(jq -r '
 
 # Build per-repo breakdown with issue counts
 # Single org-wide query for all open scanner issues, then count client-side
-issue_search=$(gh_with_backoff search issues "org:rossoctl in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
+issue_search=$(gh_with_backoff search issues "org:$ORG in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
 # bash 3.2 (macOS default) has no associative arrays. Keep counts in a
 # newline-delimited accumulator of "repo<TAB>count" rows; repo keys are
 # owner/name (no whitespace), so tab-splitting is unambiguous.
