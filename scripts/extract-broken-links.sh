@@ -85,7 +85,9 @@ jq -r --arg repo "$REPO_FULL" --arg repos_dir "$REPOS_PREFIX" '
     url: .url,
     status: $status,
     category: (
-      if (.url | test("github\\.com/(kagenti|rossoctl)")) then "internal"
+      # internal = a link back into the scanned owner (derived from $repo,
+      # owner/name), so it follows the enrolled owner, not a hardcoded org list.
+      if (.url | test("github\\.com/" + ($repo | split("/")[0]) + "/")) then "internal"
       else "external"
       end
     )
