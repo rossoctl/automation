@@ -27,7 +27,7 @@ check_module() {
 check_module core.sh setup_workspace generate_scan_id iso_to_epoch atomic_write_file validate_json_schema diff_against_previous write_report_latest append_history_row
 check_module github-api.sh gh_with_backoff gh_issue_exists close_issue_if_valid issue_has_open_pr
 check_module fork.sh validate_issue_fields score_path_suffix pick_best_candidate ensure_fork create_fork_pr
-check_module org.sh load_org_profile get_core_repos core_repo_names is_core_repo canonical_repo_for_dir validate_repos_dir
+check_module org.sh repoman_config repoman_get_repos is_enrolled validate_repos_dir
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS: all four modules source standalone with their functions defined"
