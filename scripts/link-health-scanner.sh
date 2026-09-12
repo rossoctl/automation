@@ -25,19 +25,12 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
-    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
-    --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
-# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP. Issue reads use canonical $ORG/<name>; $MAIN_REPO
-# backs the related-issue refs and the escalation URL. The report PR itself
-# targets $REPORT_TARGET_REPO (see the report-destination block below).
-load_org_profile
+# Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
+repoman_config
 
 # --- Configuration ---
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
@@ -48,9 +41,14 @@ REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
 # file, overwritten in place each run: trend tooling reconstructs history by
 # replaying git commit parents, so we store state (not dated snapshots) and
 # avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
-REPORT_TARGET_REPO="$ORG/automation"
+# TODO(RepoMan Phase 2): move report_target_repo to programs/link-health.json.
+REPORT_TARGET_REPO="rossoctl/automation"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="automation-health/link-health.md"
+
+# Standing-orders / attribution repo for the PR body's program link.
+# TODO(RepoMan Phase 2): move source_repo to programs/link-health.json.
+SOURCE_REPO="rossoctl/automation"
 
 # Clone dir for the report target: honor an explicit MAIN_REPO_DIR override,
 # else derive from REPOS_DIR.
@@ -87,78 +85,62 @@ REPOS_FAILED=0
 # Collect all broken links into a single JSONL file
 : > "$TMPDIR/broken.jsonl"
 
-# Track canonical repos already scanned this run, so duplicate clone dirs
-# (e.g. a stale "kagenti" alongside "rossoctl") are not scanned twice.
-SEEN_CANON=""
+for owner_dir in "$REPOS_DIR"/*/; do
+  [ -d "$owner_dir" ] || continue
+  owner=$(basename "$owner_dir")
+  for repo_dir in "$owner_dir"*/; do
+    [ -d "$repo_dir/.git" ] || continue
+    repo_name=$(basename "$repo_dir")
+    full_repo="$owner/$repo_name"
+    is_enrolled "$full_repo" || continue
 
-for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
-  [ -d "$repo_dir" ] || continue
-  repo_name=$(basename "$repo_dir")
+    echo "Scanning $full_repo..."
 
-  # Skip hidden dirs (except .github) and non-git dirs
-  if [[ "$repo_name" == .* && "$repo_name" != ".github" ]] || [ ! -d "$repo_dir/.git" ]; then
-    continue
-  fi
+    LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
 
-  # Restrict to core repos (allowlist), mapping pre-rename dir names to their
-  # canonical repo first. Non-core / archived clones are skipped.
-  canon=$(canonical_repo_for_dir "$repo_name")
-  if ! is_core_repo "$canon"; then
-    continue
-  fi
+    # Run lychee -- scanner-level args applied to all repos
+    LYCHEE_SCANNER_ARGS=(
+      --format json
+      --scheme http --scheme https
+      --exclude 'localhost' --exclude '127\.0\.0\.1' --exclude 'localtest\.me'
+      --exclude 'example\.com' --exclude 'example\.org'
+      --exclude-all-private
+      --exclude-path 'node_modules' --exclude-path 'vendor' --exclude-path '\.claude'
+      --accept '200,204,206,403,429,502,503'
+      --exclude 'console\.cloud\.google\.com'
+      --timeout 10
+      --max-retries 2
+      --max-concurrency 8
+    )
 
-  # Dedup: skip if another clone dir already covered this canonical repo.
-  case " $SEEN_CANON " in
-    *" $canon "*) echo "Skipping $repo_name (already scanned as $canon)"; continue ;;
-  esac
-  SEEN_CANON="$SEEN_CANON $canon"
+    if [ -f "$repo_dir/.lychee.toml" ]; then
+      lychee "${LYCHEE_SCANNER_ARGS[@]}" --config "$repo_dir/.lychee.toml" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
+    else
+      lychee "${LYCHEE_SCANNER_ARGS[@]}" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
+    fi
 
-  echo "Scanning $repo_name (as $ORG/$canon)..."
+    if [ ! -s "$LYCHEE_OUTPUT" ]; then
+      echo "  WARN: lychee produced no output for $repo_name"
+      REPOS_FAILED=$((REPOS_FAILED + 1))
+      continue
+    fi
 
-  LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
+    # Parse results
+    repo_total=$(jq '.total // 0' "$LYCHEE_OUTPUT")
+    repo_errors=$(jq '.errors // 0' "$LYCHEE_OUTPUT")
+    TOTAL_LINKS=$((TOTAL_LINKS + repo_total))
+    TOTAL_ERRORS=$((TOTAL_ERRORS + repo_errors))
+    REPOS_SCANNED=$((REPOS_SCANNED + 1))
 
-  # Run lychee -- scanner-level args applied to all repos
-  LYCHEE_SCANNER_ARGS=(
-    --format json
-    --scheme http --scheme https
-    --exclude 'localhost' --exclude '127\.0\.0\.1' --exclude 'localtest\.me'
-    --exclude 'example\.com' --exclude 'example\.org'
-    --exclude-all-private
-    --exclude-path 'node_modules' --exclude-path 'vendor' --exclude-path '\.claude'
-    --accept '200,204,206,403,429,502,503'
-    --exclude 'console\.cloud\.google\.com'
-    --timeout 10
-    --max-retries 2
-    --max-concurrency 8
-  )
+    # Extract broken links from the lychee report. The parsing/suppression/status
+    # normalization logic lives in extract-broken-links.sh so it can be unit-tested
+    # (see tests/test-extract-broken-links.sh).
+    "$SCRIPT_DIR/extract-broken-links.sh" \
+      "$LYCHEE_OUTPUT" "$full_repo" "$repo_dir" \
+      >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
 
-  if [ -f "$repo_dir/.lychee.toml" ]; then
-    lychee "${LYCHEE_SCANNER_ARGS[@]}" --config "$repo_dir/.lychee.toml" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
-  else
-    lychee "${LYCHEE_SCANNER_ARGS[@]}" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
-  fi
-
-  if [ ! -s "$LYCHEE_OUTPUT" ]; then
-    echo "  WARN: lychee produced no output for $repo_name"
-    REPOS_FAILED=$((REPOS_FAILED + 1))
-    continue
-  fi
-
-  # Parse results
-  repo_total=$(jq '.total // 0' "$LYCHEE_OUTPUT")
-  repo_errors=$(jq '.errors // 0' "$LYCHEE_OUTPUT")
-  TOTAL_LINKS=$((TOTAL_LINKS + repo_total))
-  TOTAL_ERRORS=$((TOTAL_ERRORS + repo_errors))
-  REPOS_SCANNED=$((REPOS_SCANNED + 1))
-
-  # Extract broken links from the lychee report. The parsing/suppression/status
-  # normalization logic lives in extract-broken-links.sh so it can be unit-tested
-  # (see tests/test-extract-broken-links.sh).
-  "$SCRIPT_DIR/extract-broken-links.sh" \
-    "$LYCHEE_OUTPUT" "$ORG/$canon" "$REPOS_DIR/$repo_name/" \
-    >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
-
-  echo "  Links: $repo_total, Errors: $repo_errors"
+    echo "  Links: $repo_total, Errors: $repo_errors"
+  done
 done
 
 echo ""
@@ -381,7 +363,7 @@ TREND_TABLE=$(jq -r '
 
 # Build per-repo breakdown with issue counts
 # Single org-wide query for all open scanner issues, then count client-side
-issue_search=$(gh_with_backoff search issues "org:$ORG in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
+issue_search=$(gh_with_backoff search issues "org:${REPORT_TARGET_REPO%%/*} in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
 # bash 3.2 (macOS default) has no associative arrays. Keep counts in a
 # newline-delimited accumulator of "repo<TAB>count" rows; repo keys are
 # owner/name (no whitespace), so tab-splitting is unambiguous.
@@ -529,7 +511,7 @@ Auto-updated by Rossoctl Link Health Scanner. This PR is continuously updated wi
 
 ## Related issue(s)
 
-- $MAIN_REPO#1178
+- $REPORT_TARGET_REPO#1178
 
 ## Automation program
 
@@ -552,7 +534,7 @@ if [ "$NEW_LINKS" -gt "$ESCALATION_THRESHOLD" ]; then
   echo ""
   echo "ALERT: Link health scan found $NEW_LINKS new broken links (threshold: $ESCALATION_THRESHOLD)."
   echo "This may indicate a bulk documentation change or a widespread external service outage."
-  echo "Review issues at https://github.com/$MAIN_REPO/issues?q=label:broken-link"
+  echo "Review issues at https://github.com/$REPORT_TARGET_REPO/issues?q=label:broken-link"
 fi
 
 # --- Summary ---
