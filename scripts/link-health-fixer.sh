@@ -12,6 +12,11 @@ source "$SCRIPT_DIR/program-lib.sh"
 
 # --- Configuration ---
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
+
+# Standing-orders / attribution repo for the PR body's program link.
+# TODO(RepoMan Phase 2): move source_repo to programs/link-health.json.
+SOURCE_REPO="rossoctl/automation"
+
 FIX_DATE=$(date +%Y-%m-%d)
 SCAN_DATE=$(date +%Y-%m-%d)
 
@@ -32,19 +37,13 @@ while [[ $# -gt 0 ]]; do
     --live) DRY_RUN=false; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
-    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
-    --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
-# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP. Reads use canonical $ORG/<name>; fork-PR write
-# paths derive from $ORG/$FORK_OWNER.
-load_org_profile
+# Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
+repoman_config
 
 # --- Workspace setup ---
 setup_workspace "link-fixer"
@@ -66,35 +65,24 @@ echo "=== Step 1: Gathering open scanner issues ==="
 ISSUES_FILE="$TMPDIR/issues.jsonl"
 : > "$ISSUES_FILE"
 
-SEEN_CANON=""
-for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
-  [ -d "$repo_dir" ] || continue
-  repo_name=$(basename "$repo_dir")
-  if [[ "$repo_name" == .* && "$repo_name" != ".github" ]] || [ ! -d "$repo_dir/.git" ]; then
-    continue
-  fi
+for owner_dir in "$REPOS_DIR"/*/; do
+  [ -d "$owner_dir" ] || continue
+  owner=$(basename "$owner_dir")
+  for repo_dir in "$owner_dir"*/; do
+    [ -d "$repo_dir/.git" ] || continue
+    repo_name=$(basename "$repo_dir")
+    full_repo="$owner/$repo_name"
+    is_enrolled "$full_repo" || continue
 
-  # Restrict to core repos (allowlist), mapping pre-rename dir names first;
-  # dedup so duplicate clone dirs for the same canonical repo run once.
-  canon=$(canonical_repo_for_dir "$repo_name")
-  if ! is_core_repo "$canon"; then
-    continue
-  fi
-  case " $SEEN_CANON " in
-    *" $canon "*) continue ;;
-  esac
-  SEEN_CANON="$SEEN_CANON $canon"
+    issues_json=$(gh issue list --repo "$full_repo" \
+      --search "Broken link in:title" \
+      --state open --limit 100 \
+      --json number,title,body 2>/dev/null || echo "[]")
 
-  full_repo="$ORG/$canon"
-
-  issues_json=$(gh issue list --repo "$full_repo" \
-    --search "Broken link in:title" \
-    --state open --limit 100 \
-    --json number,title,body 2>/dev/null || echo "[]")
-
-  # Add repository info since gh issue list doesn't include it
-  echo "$issues_json" | jq -c --arg repo "$full_repo" \
-    '.[] | . + {repository: {nameWithOwner: $repo}}' >> "$ISSUES_FILE" 2>/dev/null || true
+    # Add repository info since gh issue list doesn't include it
+    echo "$issues_json" | jq -c --arg repo "$full_repo" \
+      '.[] | . + {repository: {nameWithOwner: $repo}}' >> "$ISSUES_FILE" 2>/dev/null || true
+  done
 done
 
 TOTAL_ISSUES=$(wc -l < "$ISSUES_FILE" | tr -d ' ')
@@ -390,9 +378,9 @@ while IFS= read -r item; do
   echo "    FIX: $target_path -> $new_path"
 
   # Determine which repo contains the source file that needs editing.
-  # $repo is always "owner/name"; strip any owner so the bare repo name is
-  # correct regardless of which org owns it (do not couple to $ORG).
-  source_repo_name="${repo##*/}"
+  # $repo is already "owner/name" (from the enrolled-repo scan loop), so it
+  # carries the full ref straight through to downstream fix/PR use sites.
+  source_repo_name="$repo"
 
   jq -nc \
     --arg number "$number" \
@@ -426,10 +414,14 @@ else
 
   for fix_repo in $repos_with_fixes; do
     echo ""
-    echo "--- Repo: $ORG/$fix_repo ---"
+    echo "--- Repo: $fix_repo ---"
+
+    # fix_repo is "owner/name" (from the enrolled-repo scan loop). Derive the
+    # bare name for filesystem/branch/remote tokens that must not contain "/".
+    fix_repo_name="${fix_repo#*/}"
 
     fix_repo_dir="$REPOS_DIR/$fix_repo"
-    FIX_BRANCH="fix/broken-links-${fix_repo}-${FIX_DATE}"
+    FIX_BRANCH="fix/broken-links-${fix_repo_name}-${FIX_DATE}"
 
     # Collect fixes for this repo
     repo_fixes=$(jq -c "select(.source_repo == \"$fix_repo\")" "$FIXES_FILE")
@@ -438,9 +430,9 @@ else
 
     if [ "$DRY_RUN" = true ]; then
       echo ""
-      echo "[DRY RUN] PR Preview for $ORG/$fix_repo:"
+      echo "[DRY RUN] PR Preview for $fix_repo:"
       echo "  Branch: $FIX_BRANCH"
-      echo "  Title: docs: Fix $fix_count broken internal link(s) in $fix_repo"
+      echo "  Title: docs: Fix $fix_count broken internal link(s) in $fix_repo_name"
       echo "  Changes:"
 
       echo "$repo_fixes" | while IFS= read -r fix; do
@@ -470,12 +462,12 @@ else
       cd "$fix_repo_dir"
 
       # Fork on demand (uses shared library)
-      ensure_fork "$ORG" "$fix_repo" "$FORK_OWNER"
+      ensure_fork "${fix_repo%%/*}" "${fix_repo#*/}" "$FORK_OWNER"
 
       # Set up remote
-      FORK_REMOTE="clawgenti-${fix_repo}-fork"
+      FORK_REMOTE="clawgenti-${fix_repo_name}-fork"
       if ! git remote get-url "$FORK_REMOTE" &>/dev/null 2>&1; then
-        git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${fix_repo}.git"
+        git remote add "$FORK_REMOTE" "https://github.com/$FORK_OWNER/${fix_repo_name}.git"
       fi
 
       # Create branch from fork's main
@@ -500,7 +492,7 @@ else
       done
 
       # Commit
-      git commit -s -m "docs: Fix broken internal links in $fix_repo
+      git commit -s -m "docs: Fix broken internal links in $fix_repo_name
 
 Automated fix by OpenClaw Link Health Fixer ($FIX_DATE)." 2>/dev/null || {
         echo "  No changes to commit"
@@ -535,9 +527,9 @@ Broken internal links updated to point to current file locations.
 
 Generated by the [Rossoctl Link Health Fixer](https://github.com/$SOURCE_REPO/blob/main/standing-orders/link-health.md)."
 
-      pr_url=$(gh pr create --repo "$ORG/$fix_repo" \
+      pr_url=$(gh pr create --repo "$fix_repo" \
         --head "$FORK_OWNER:$FIX_BRANCH" --base main \
-        --title "docs: Fix $fix_count broken internal link(s) in $fix_repo" \
+        --title "docs: Fix $fix_count broken internal link(s) in $fix_repo_name" \
         --body "$pr_body" 2>/dev/null) || {
         echo "  WARN: Failed to create PR"
         continue
@@ -550,7 +542,7 @@ Generated by the [Rossoctl Link Health Fixer](https://github.com/$SOURCE_REPO/bl
         issue_num=$(echo "$fix" | jq -r '.number')
         src_file=$(echo "$fix" | jq -r '.source_file')
         new_path=$(echo "$fix" | jq -r '.new_path')
-        gh issue comment "$issue_num" --repo "$ORG/$fix_repo" \
+        gh issue comment "$issue_num" --repo "$fix_repo" \
           --body "Fix submitted: $pr_url. The broken link in \`$src_file\` has been updated to point to \`$new_path\`." \
           2>/dev/null || echo "  WARN: Failed to comment on issue #$issue_num"
         sleep 1
