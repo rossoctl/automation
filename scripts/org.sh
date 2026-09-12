@@ -65,6 +65,90 @@ validate_repos_dir() {
 }
 
 # =============================================================================
+# REPOMAN INPUT MODEL
+# =============================================================================
+#
+# RepoMan reads two user-managed files under ~/.repoman:
+#   config.json : deployment-wide constants ({repos_dir, fork_owner})
+#   repos.json  : the enrolled set (array of {owner, name})
+# There is no $ORG and no core-repos.txt. Repos are addressed as owner/name,
+# and clone dirs are owner-namespaced ($REPOS_DIR/<owner>/<name>/).
+
+# Read ~/.repoman/config.json and export the deployment-wide constants.
+# Sets: REPOS_DIR (from .repos_dir, leading ~ expanded to $HOME), FORK_OWNER
+# (from .fork_owner). Override the path with $REPOMAN_CONFIG_FILE (tests).
+# Fails loud (return 1) on a missing file or a missing/empty required key --
+# report/source targets are NOT read here; they are per-program (Phase 2).
+repoman_config() {
+  local config_file="${REPOMAN_CONFIG_FILE:-$HOME/.repoman/config.json}"
+  if [ ! -f "$config_file" ]; then
+    echo "ERROR: RepoMan config not found: $config_file" >&2
+    return 1
+  fi
+
+  local repos_dir fork_owner
+  repos_dir=$(jq -r '.repos_dir // empty' "$config_file")
+  fork_owner=$(jq -r '.fork_owner // empty' "$config_file")
+
+  if [ -z "$repos_dir" ]; then
+    echo "ERROR: config.json missing required key: repos_dir ($config_file)" >&2
+    return 1
+  fi
+  if [ -z "$fork_owner" ]; then
+    echo "ERROR: config.json missing required key: fork_owner ($config_file)" >&2
+    return 1
+  fi
+
+  # Expand a leading ~ to $HOME (jq returns the literal string).
+  case "$repos_dir" in
+    "~") repos_dir="$HOME" ;;
+    "~/"*) repos_dir="$HOME/${repos_dir#\~/}" ;;
+  esac
+
+  REPOS_DIR="$repos_dir"
+  FORK_OWNER="$fork_owner"
+  export REPOS_DIR FORK_OWNER
+}
+
+# Print the enrolled repo set, one "owner/name" per line, in file order.
+# Reads ~/.repoman/repos.json (array of {owner,name}); override the path with
+# $REPOMAN_REPOS_FILE (tests). Fails loud (return 1) on a missing/empty file
+# or an entry missing owner or name -- never silently scan an empty set.
+#
+# Usage (portable; no mapfile on bash 3.2):
+#   REPOS=(); while IFS= read -r r; do [ -n "$r" ] && REPOS+=("$r"); done \
+#     < <(repoman_get_repos)
+repoman_get_repos() {
+  local repos_file="${REPOMAN_REPOS_FILE:-$HOME/.repoman/repos.json}"
+  if [ ! -f "$repos_file" ]; then
+    echo "ERROR: RepoMan repos file not found: $repos_file" >&2
+    return 1
+  fi
+
+  # jq -e exits non-zero if the array is empty or any entry lacks owner/name;
+  # the guarded expression fails the whole read rather than emit a bad ref.
+  local out
+  if ! out=$(jq -er '
+      if length == 0 then error("empty repos array")
+      else .[] | (.owner // error("entry missing owner")) as $o
+                 | (.name  // error("entry missing name"))  as $n
+                 | "\($o)/\($n)"
+      end' "$repos_file" 2>/dev/null); then
+    echo "ERROR: repos.json is empty or has a malformed entry: $repos_file" >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# Return 0 if the given "owner/name" is in the enrolled set, else 1.
+# Exact whole-line match (grep -Fx) to avoid substring false positives.
+# Args: $1 - "owner/name"
+is_enrolled() {
+  local repo="$1"
+  repoman_get_repos | grep -qxF "$repo"
+}
+
+# =============================================================================
 # REPO SELECTION
 # =============================================================================
 #
