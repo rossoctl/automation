@@ -16,11 +16,13 @@ generate_scan_id
 gh_issue_exists
 gh_with_backoff
 is_enrolled
+is_enrolled_in
 iso_to_epoch
 issue_has_open_pr
 pick_best_candidate
 repoman_config
 repoman_get_repos
+repoman_load_enrolled
 score_path_suffix
 setup_workspace
 validate_issue_fields
@@ -35,7 +37,7 @@ GOT=$(
 )
 
 if [ "$GOT" = "$WANT" ]; then
-  echo "PASS: lib function inventory (21 functions, none lost/renamed)"
+  echo "PASS: lib function inventory (23 functions, none lost/renamed)"
   exit 0
 else
   echo "FAIL: lib function inventory mismatch"

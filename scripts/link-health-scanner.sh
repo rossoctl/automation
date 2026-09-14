@@ -85,6 +85,10 @@ REPOS_FAILED=0
 # Collect all broken links into a single JSONL file
 : > "$TMPDIR/broken.jsonl"
 
+# Load the enrolled set once; membership is then an in-memory check per repo
+# (is_enrolled_in) rather than a repos.json re-parse per iteration.
+ENROLLED=$(repoman_load_enrolled) || exit 1
+
 for owner_dir in "$REPOS_DIR"/*/; do
   [ -d "$owner_dir" ] || continue
   owner=$(basename "$owner_dir")
@@ -92,7 +96,7 @@ for owner_dir in "$REPOS_DIR"/*/; do
     [ -d "$repo_dir/.git" ] || continue
     repo_name=$(basename "$repo_dir")
     full_repo="$owner/$repo_name"
-    is_enrolled "$full_repo" || continue
+    is_enrolled_in "$full_repo" "$ENROLLED" || continue
 
     echo "Scanning $full_repo..."
 

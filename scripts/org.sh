@@ -147,9 +147,31 @@ repoman_get_repos() {
 # Return 0 if the given "owner/name" is in the enrolled set, else 1.
 # Exact whole-line match (grep -Fx) to avoid substring false positives.
 # Args: $1 - "owner/name"
+#
+# Re-parses repos.json on every call. Inside a clone loop, load the enrolled set
+# ONCE with repoman_load_enrolled and check membership with is_enrolled_in to
+# avoid a full jq parse per iteration.
 is_enrolled() {
   local repo="$1"
   repoman_get_repos | grep -qxF "$repo"
+}
+
+# Load the enrolled set once for in-memory membership checks. Prints the same
+# "owner/name"-per-line set as repoman_get_repos (and fails loud identically);
+# callers capture it into a variable before a loop:
+#   enrolled=$(repoman_load_enrolled) || exit 1
+repoman_load_enrolled() {
+  repoman_get_repos
+}
+
+# Return 0 if "owner/name" ($1) is in a preloaded enrolled set ($2, newline-
+# separated as produced by repoman_load_enrolled), else 1. Exact whole-line
+# match (grep -Fx) -- same substring-safe semantics as is_enrolled, but with no
+# file read, so it is cheap to call per loop iteration.
+# Args: $1 - "owner/name"; $2 - the preloaded enrolled set
+is_enrolled_in() {
+  local repo="$1" enrolled="$2"
+  printf '%s\n' "$enrolled" | grep -qxF "$repo"
 }
 
 # =============================================================================

@@ -52,4 +52,34 @@ if REPOMAN_REPOS_FILE="$FIX" is_enrolled "rossoctl/cort"; then
   echo "FAIL is_enrolled: partial 'cort' must not match 'cortex'"; fail=1
 fi
 
-[ "$fail" -eq 0 ] && echo "PASS: repoman_get_repos + is_enrolled (order, fail-loud, exact match)" || exit 1
+# --- repoman_load_enrolled: yields the same set as repoman_get_repos ---
+# Callers load the enrolled set ONCE into a variable before a clone loop, then
+# check membership in-memory (is_enrolled_in) instead of re-parsing repos.json
+# on every iteration.
+loaded=$(REPOMAN_REPOS_FILE="$FIX" repoman_load_enrolled)
+[ "$loaded" = "$want" ] \
+  || { echo "FAIL repoman_load_enrolled: got [$loaded] want [$want]"; fail=1; }
+
+# --- repoman_load_enrolled: fails loud like repoman_get_repos ---
+if REPOMAN_REPOS_FILE="$TEST_TMPDIR/empty.json" repoman_load_enrolled >/dev/null 2>&1; then
+  echo "FAIL repoman_load_enrolled should error on empty repos array"; fail=1
+fi
+
+# --- is_enrolled_in: exact whole-line match against a preloaded set string ---
+is_enrolled_in "rossoctl/cortex" "$loaded" \
+  || { echo "FAIL is_enrolled_in: rossoctl/cortex should be enrolled"; fail=1; }
+is_enrolled_in "alice/cortex" "$loaded" \
+  || { echo "FAIL is_enrolled_in: alice/cortex should be enrolled (same name, diff owner)"; fail=1; }
+if is_enrolled_in "rossoctl/nope" "$loaded"; then
+  echo "FAIL is_enrolled_in: rossoctl/nope should NOT match"; fail=1
+fi
+# Guard against substring false positives.
+if is_enrolled_in "rossoctl/cort" "$loaded"; then
+  echo "FAIL is_enrolled_in: partial 'cort' must not match 'cortex'"; fail=1
+fi
+# Empty set string matches nothing (never a silent all-pass).
+if is_enrolled_in "rossoctl/cortex" ""; then
+  echo "FAIL is_enrolled_in: empty set must match nothing"; fail=1
+fi
+
+[ "$fail" -eq 0 ] && echo "PASS: repoman_get_repos + is_enrolled + load_enrolled/is_enrolled_in (order, fail-loud, exact match)" || exit 1

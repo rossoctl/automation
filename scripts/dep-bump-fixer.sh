@@ -95,6 +95,8 @@ if [ ! -f "$REPORTS_DIR/baseline.json" ]; then
 
   # Query merged Dependabot PRs across all repos (last 90 days)
   : > "$TMPDIR/merged_prs.jsonl"
+  # Load the enrolled set once; membership is then an in-memory check per repo.
+  ENROLLED=$(repoman_load_enrolled) || exit 1
   for owner_dir in "$REPOS_DIR"/*/; do
     [ -d "$owner_dir" ] || continue
     owner=$(basename "$owner_dir")
@@ -102,7 +104,7 @@ if [ ! -f "$REPORTS_DIR/baseline.json" ]; then
       [ -d "$repo_dir/.git" ] || continue
       repo_name=$(basename "$repo_dir")
       full_repo="$owner/$repo_name"
-      is_enrolled "$full_repo" || continue
+      is_enrolled_in "$full_repo" "$ENROLLED" || continue
 
       gh pr list --repo "$full_repo" \
         --author "app/dependabot" \
@@ -154,6 +156,10 @@ echo "--- Discovering scanner issues ---"
 : > "$TMPDIR/issues.jsonl"
 REPOS_CHECKED=0
 
+# Load the enrolled set once; membership is then an in-memory check per repo
+# (is_enrolled_in) rather than a repos.json re-parse per iteration.
+ENROLLED=$(repoman_load_enrolled) || exit 1
+
 for owner_dir in "$REPOS_DIR"/*/; do
   [ -d "$owner_dir" ] || continue
   owner=$(basename "$owner_dir")
@@ -161,7 +167,7 @@ for owner_dir in "$REPOS_DIR"/*/; do
     [ -d "$repo_dir/.git" ] || continue
     repo_name=$(basename "$repo_dir")
     full_repo="$owner/$repo_name"
-    is_enrolled "$full_repo" || continue
+    is_enrolled_in "$full_repo" "$ENROLLED" || continue
 
     REPOS_CHECKED=$((REPOS_CHECKED + 1))
 
@@ -521,6 +527,8 @@ echo "--- Computing metrics ---"
 
 # Query recently merged Dependabot PRs (last 30 days) for TTM
 : > "$TMPDIR/recent_merged.jsonl"
+# Load the enrolled set once; membership is then an in-memory check per repo.
+ENROLLED=$(repoman_load_enrolled) || exit 1
 for owner_dir in "$REPOS_DIR"/*/; do
   [ -d "$owner_dir" ] || continue
   owner=$(basename "$owner_dir")
@@ -528,7 +536,7 @@ for owner_dir in "$REPOS_DIR"/*/; do
     [ -d "$repo_dir/.git" ] || continue
     repo_name=$(basename "$repo_dir")
     full_repo="$owner/$repo_name"
-    is_enrolled "$full_repo" || continue
+    is_enrolled_in "$full_repo" "$ENROLLED" || continue
 
     gh pr list --repo "$full_repo" \
       --author "app/dependabot" \
