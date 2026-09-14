@@ -28,9 +28,6 @@ while [[ $# -gt 0 ]]; do
     --live) DRY_RUN=false; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
     --main-repo-dir) MAIN_REPO_DIR="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
-    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -53,9 +50,6 @@ Options:
   --reports-dir DIR    Base reports directory (default: $REPORTS_DIR or ./reports)
   --main-repo-dir DIR  Path to the report-target repo clone, overriding the
                        REPOS_DIR-derived default (default: $MAIN_REPO_DIR)
-  --profile NAME       Org profile to load (config/org.<name>.env; default org.env)
-  --org NAME           GitHub org (default: from profile, config/org.env)
-  --fork-owner NAME    Fork owner for PR workflow (default: from profile)
   --verbose            Print diagnostic output
   --help, -h           Show this help
 
@@ -68,9 +62,8 @@ HELP
   exit 0
 fi
 
-# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP.
-load_org_profile
+# Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
+repoman_config
 
 # Report-PR destination. The org main repo's docs/ folder feeds the docs site
 # (rossoctl.dev) and cannot host machine-generated reports, so the standing
@@ -78,7 +71,9 @@ load_org_profile
 # file, overwritten in place each run: trend tooling reconstructs history by
 # replaying git commit parents, so we store state (not dated snapshots) and
 # avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
-REPORT_TARGET_REPO="$ORG/automation"
+# TODO(RepoMan Phase 2): move report_target_repo/source_repo to programs/health-dashboard.json.
+REPORT_TARGET_REPO="rossoctl/automation"
+SOURCE_REPO="rossoctl/automation"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="automation-health/automation-health.md"
 # Clone dir for the report target: honor an explicit --main-repo-dir/MAIN_REPO_DIR
@@ -507,7 +502,7 @@ Auto-updated by Rossoctl Automation Health Dashboard. This PR is continuously up
 
 ## Related issue(s)
 
-- $MAIN_REPO#1260
+- $REPORT_TARGET_REPO#1260
 
 ## Automation program
 
