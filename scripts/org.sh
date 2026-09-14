@@ -100,10 +100,13 @@ repoman_config() {
     return 1
   fi
 
-  # Expand a leading ~ to $HOME (jq returns the literal string).
+  # Expand a leading ~ to $HOME. jq returns the literal string "~", so these
+  # patterns match a literal tilde and we expand to $HOME by hand -- SC2088's
+  # "tilde does not expand in quotes" is exactly the intent here, not a bug.
+  # shellcheck disable=SC2088
   case "$repos_dir" in
     "~") repos_dir="$HOME" ;;
-    "~/"*) repos_dir="$HOME/${repos_dir#\~/}" ;;
+    "~/"*) repos_dir="$HOME/${repos_dir#"~/"}" ;;
   esac
 
   REPOS_DIR="$repos_dir"
