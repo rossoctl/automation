@@ -3,7 +3,8 @@ set -euo pipefail
 
 # restore.sh -- reverse the snapshot flow on a fresh VM. The DRY-RUN plan is the
 # tested, reviewable unit: it prints the ordered restore steps derived from the
-# snapshot's manifest.json plus the org profile, WITHOUT mutating the host.
+# snapshot's manifest.json (which carries each repo's owner/name and recorded
+# origin), WITHOUT mutating the host.
 # Real execution mutates a host (installs software, clones repos, enables a
 # service) and is out of hermetic-test scope.
 #
@@ -18,10 +19,9 @@ set -euo pipefail
 #
 # Discussion #62 (owner-vs-org identity): each repo is cloned from its MANIFEST-
 # RECORDED `origin` (the real captured remote URL). Only when a repo has no
-# recorded origin does restore fall back to the $ORG namespace. So a repo owned
-# by an individual rather than the org is restored faithfully. (Alignment with
-# the newer RepoMan per-repo-owner model is tracked separately; the recorded-
-# origin design keeps this correct in the meantime.)
+# recorded origin does restore fall back to https://github.com/<owner>/<name>
+# reconstructed from the recorded name. So a repo owned by an individual rather
+# than an org is restored faithfully.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -67,8 +67,9 @@ if ! jq empty "$MANIFEST" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Resolve org identity (for the empty-origin fallback) and the target repos dir.
-load_org_profile
+# Resolve deployment constants (for the empty-origin fallback) and the target
+# repos dir from ~/.repoman/config.json.
+repoman_config
 validate_repos_dir "$REPOS_DIR"
 
 # emit: in dry-run, print the step; otherwise execute it. Keeping the two modes
@@ -162,7 +163,8 @@ else
 fi
 
 # 5. Re-clone the core repos and check out the recorded branch. Clone from each
-#    repo's RECORDED origin; fall back to the $ORG namespace only when empty.
+#    repo's RECORDED origin; fall back to https://github.com/<owner>/<name>
+#    reconstructed from the recorded name only when empty.
 echo "Step 5: re-clone core repos"
 repo_count=$(jq '.repos | length' "$MANIFEST")
 i=0
@@ -173,15 +175,17 @@ while [ "$i" -lt "$repo_count" ]; do
   r_dirty=$(jq -r ".repos[$i].dirty" "$MANIFEST")
 
   # Clone URL: the recorded origin is authoritative. Only synthesize a URL from
-  # $ORG when no origin was captured (#62: never override a real origin).
+  # the recorded owner/name when no origin was captured (#62: never override a
+  # real origin). $r_name is the full owner/name, so github.com/<owner>/<name>.
   if [ -n "$r_origin" ] && [ "$r_origin" != "null" ]; then
     clone_url="$r_origin"
   else
-    clone_url="https://github.com/$ORG/$r_name.git"
-    echo "  NOTE: $r_name had no recorded origin; using \$ORG fallback $clone_url" >&2
+    clone_url="https://github.com/$r_name.git"
+    echo "  NOTE: $r_name had no recorded origin; reconstructing $clone_url from its enrolled owner/name" >&2
   fi
 
   target="$REPOS_DIR/$r_name"
+  emit mkdir -p "$REPOS_DIR/${r_name%/*}"
   emit git clone "$clone_url" "$target"
   emit git -C "$target" checkout "$r_branch"
   if [ "$r_dirty" = "true" ]; then
