@@ -306,13 +306,17 @@ lh_repos=""
 db_repos=""
 
 if [ "$HAS_LINK_HEALTH" = true ]; then
-  lh_repos=$(jq -r '[.broken[].repo] | unique | .[] | split("/")[1]' "$LINK_SCAN_DIR/latest.json" 2>/dev/null | sort -u || true)
+  # .repo is the full owner/name ref (extract-broken-links.sh emits it verbatim).
+  # Key on the full ref so it matches db_repos below -- stripping the owner here
+  # would make the two program sets un-mergeable (no repo could match both).
+  lh_repos=$(jq -r '[.broken[].repo] | unique | .[]' "$LINK_SCAN_DIR/latest.json" 2>/dev/null | sort -u || true)
   # Also include repos scanned (from history, repos_scanned is a count not a list)
   # Fall back to broken repos as proxy for "scanned repos"
 fi
 
 if [ "$HAS_DEP_BUMP" = true ]; then
-  # Repos with dependabot activity
+  # Repos with dependabot activity -- .repo is the full owner/name ref, same
+  # shape as lh_repos, so the sort -u merge and grep -qxF cross-check align.
   db_repos=$(jq -r '([.stale_prs[].repo] + [.coverage_gaps[].repo]) | unique | .[]' "$DEP_BUMP_DIR/latest.json" 2>/dev/null | sort -u || true)
 fi
 

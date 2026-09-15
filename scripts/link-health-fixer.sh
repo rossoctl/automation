@@ -382,15 +382,14 @@ while IFS= read -r item; do
 
   echo "    FIX: $target_path -> $new_path"
 
-  # Determine which repo contains the source file that needs editing.
-  # $repo is already "owner/name" (from the enrolled-repo scan loop), so it
-  # carries the full ref straight through to downstream fix/PR use sites.
-  source_repo_name="$repo"
-
+  # $repo is already the full "owner/name" (from the enrolled-repo scan loop),
+  # so it carries the full ref straight through to .source_repo -- which is
+  # grouped and compared as a full ref downstream (Step 5). No alias: passing a
+  # separate bare-vs-full-named copy is exactly the shape mismatch to avoid.
   jq -nc \
     --arg number "$number" \
     --arg repo "$repo" \
-    --arg source_repo "$source_repo_name" \
+    --arg source_repo "$repo" \
     --arg source_file "$source_file" \
     --arg old_url "$broken_url" \
     --arg new_url "$new_url" \

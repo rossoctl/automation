@@ -96,12 +96,17 @@ CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
 while IFS= read -r full_repo; do
   [ -n "$full_repo" ] || continue
-  repo_name="${full_repo#*/}"
   repo_dir="$REPOS_DIR/$full_repo"
 
   echo "Scanning $full_repo..."
 
-  LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
+  # Key the temp file on the full owner/name (slash flattened to _), not the
+  # bare name: rossoctl/cortex and alice/cortex share a bare name, and keying
+  # on it would make the second scan overwrite the first (the [ ! -s ] guard
+  # cannot catch it -- the file is non-empty). That same-name-different-owner
+  # case is exactly what the owner-namespaced model exists to support.
+  safe_repo="${full_repo//\//_}"
+  LYCHEE_OUTPUT="$TMPDIR/lychee_${safe_repo}.json"
 
   # Run lychee -- scanner-level args applied to all repos
   LYCHEE_SCANNER_ARGS=(
@@ -125,7 +130,7 @@ while IFS= read -r full_repo; do
   fi
 
   if [ ! -s "$LYCHEE_OUTPUT" ]; then
-    echo "  WARN: lychee produced no output for $repo_name"
+    echo "  WARN: lychee produced no output for $full_repo"
     REPOS_FAILED=$((REPOS_FAILED + 1))
     continue
   fi
