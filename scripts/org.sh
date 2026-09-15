@@ -131,11 +131,14 @@ repoman_get_repos() {
 
   # jq -e exits non-zero if the array is empty or any entry lacks owner/name;
   # the guarded expression fails the whole read rather than emit a bad ref.
+  # An empty string is rejected too: jq's `//` fires only on null/false/absent,
+  # not on "", so a `{"owner":"a","name":""}` typo would otherwise emit "a/".
+  # select() drops the empty/null value so `//` sees `empty` and errors.
   local out
   if ! out=$(jq -er '
       if length == 0 then error("empty repos array")
-      else .[] | (.owner // error("entry missing owner")) as $o
-                 | (.name  // error("entry missing name"))  as $n
+      else .[] | ((.owner | select(. != null and . != "")) // error("entry missing owner")) as $o
+                 | ((.name  | select(. != null and . != "")) // error("entry missing name"))  as $n
                  | "\($o)/\($n)"
       end' "$repos_file" 2>/dev/null); then
     echo "ERROR: repos.json is empty or has a malformed entry: $repos_file" >&2

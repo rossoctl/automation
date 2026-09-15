@@ -306,11 +306,12 @@ echo "--- Dependabot coverage audit ---"
 : > "$TMPDIR/coverage_gaps.jsonl"
 
 while IFS= read -r eco_record; do
-  repo_name=$(echo "$eco_record" | jq -r '.repo')
+  # .repo is the full owner/name; the clone lives at $REPOS_DIR/<owner>/<name>.
+  full_repo=$(echo "$eco_record" | jq -r '.repo')
   detected=$(echo "$eco_record" | jq -r '.ecosystems | join(",")')
 
-  dependabot_yml="$REPOS_DIR/$repo_name/.github/dependabot.yml"
-  dependabot_yaml="$REPOS_DIR/$repo_name/.github/dependabot.yaml"
+  dependabot_yml="$REPOS_DIR/$full_repo/.github/dependabot.yml"
+  dependabot_yaml="$REPOS_DIR/$full_repo/.github/dependabot.yaml"
 
   config_file=""
   if [ -f "$dependabot_yml" ]; then
@@ -356,7 +357,7 @@ while IFS= read -r eco_record; do
     gaps="${gaps%,}"
 
     if [ -n "$gaps" ]; then
-      jq -nc --arg repo "$repo_name" --arg detected "$detected" \
+      jq -nc --arg repo "$full_repo" --arg detected "$detected" \
         --arg configured "$configured" --arg gaps "$gaps" \
         '{repo: $repo, has_config: true,
           detected: ($detected | split(",")),

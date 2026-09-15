@@ -241,11 +241,13 @@ while IFS= read -r item; do
     continue
   fi
 
-  # Extract target repo and path from URL
+  # Extract target owner, repo, and path from URL
+  target_org=""
   target_repo_name=""
   target_path=""
 
   if echo "$broken_url" | grep -qE 'github\.com/[^/]+/[^/]+/(blob|tree)/'; then
+    target_org=$(echo "$broken_url" | sed -nE 's#.*github\.com/([^/]+)/.*#\1#p')
     target_repo_name=$(echo "$broken_url" | sed -nE 's#.*github\.com/[^/]+/([^/]+)/.*#\1#p')
     target_path=$(echo "$broken_url" | sed -E 's#.*/((blob|tree))/[^/]+/##')
   else
@@ -254,9 +256,12 @@ while IFS= read -r item; do
     continue
   fi
 
-  target_repo_dir="$REPOS_DIR/$target_repo_name"
+  # Owner-namespaced clone layout: the target clone lives at
+  # $REPOS_DIR/<owner>/<name>, so the owner parsed from the URL is required
+  # to locate it. A bare-name join would miss it and mark the link unfixable.
+  target_repo_dir="$REPOS_DIR/$target_org/$target_repo_name"
   if [ ! -d "$target_repo_dir/.git" ]; then
-    echo "  #$number: Target repo $target_repo_name not cloned locally, skipping"
+    echo "  #$number: Target repo $target_org/$target_repo_name not cloned locally, skipping"
     UNFIXABLE_COUNT=$((UNFIXABLE_COUNT + 1))
     continue
   fi
@@ -365,7 +370,7 @@ while IFS= read -r item; do
   # Build new URL (BSD-compatible)
   target_ref=$(echo "$broken_url" | sed -nE 's#.*(blob|tree)/([^/]+)/.*#\2#p')
   url_type=$(echo "$broken_url" | sed -nE 's#.*(blob|tree)/.*#\1#p')
-  target_org=$(echo "$broken_url" | sed -nE 's#.*github\.com/([^/]+)/.*#\1#p')
+  # target_org was already parsed from $broken_url above.
   new_url="https://github.com/$target_org/$target_repo_name/$url_type/$target_ref/$new_path"
 
   # Verify the new path exists

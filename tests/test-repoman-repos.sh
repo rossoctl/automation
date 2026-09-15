@@ -39,6 +39,18 @@ if REPOMAN_REPOS_FILE="$TEST_TMPDIR/malformed.json" repoman_get_repos >/dev/null
   echo "FAIL should error on entry missing name"; fail=1
 fi
 
+# --- fail loud: entry with empty-string name (jq's // does not trip on "") ---
+echo '[{"owner": "rossoctl", "name": ""}]' > "$TEST_TMPDIR/empty-name.json"
+if REPOMAN_REPOS_FILE="$TEST_TMPDIR/empty-name.json" repoman_get_repos >/dev/null 2>&1; then
+  echo "FAIL should error on entry with empty name (would emit 'rossoctl/')"; fail=1
+fi
+
+# --- fail loud: entry with empty-string owner ---
+echo '[{"owner": "", "name": "automation"}]' > "$TEST_TMPDIR/empty-owner.json"
+if REPOMAN_REPOS_FILE="$TEST_TMPDIR/empty-owner.json" repoman_get_repos >/dev/null 2>&1; then
+  echo "FAIL should error on entry with empty owner (would emit '/automation')"; fail=1
+fi
+
 # --- is_enrolled: exact whole-line match ---
 REPOMAN_REPOS_FILE="$FIX" is_enrolled "rossoctl/cortex" \
   || { echo "FAIL is_enrolled: rossoctl/cortex should be enrolled"; fail=1; }

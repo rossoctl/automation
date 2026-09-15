@@ -74,11 +74,12 @@ repoman_config
 # TODO(RepoMan Phase 2): move report_target_repo/source_repo to programs/health-dashboard.json.
 REPORT_TARGET_REPO="rossoctl/automation"
 SOURCE_REPO="rossoctl/automation"
+REPORT_TARGET_OWNER="${REPORT_TARGET_REPO%%/*}"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="automation-health/automation-health.md"
 # Clone dir for the report target: honor an explicit --main-repo-dir/MAIN_REPO_DIR
-# override, else derive from REPOS_DIR.
-REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
+# override, else derive from the owner-namespaced layout ($REPOS_DIR/<owner>/<name>).
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME}"
 
 # --- Validate inputs ---
 if [ -z "${REPORTS_DIR:-}" ]; then
@@ -454,7 +455,7 @@ else
   if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
     echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
     echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
-    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME"
     exit 1
   fi
 

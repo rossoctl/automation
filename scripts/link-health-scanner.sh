@@ -43,6 +43,7 @@ REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
 # avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
 # TODO(RepoMan Phase 2): move report_target_repo to programs/link-health.json.
 REPORT_TARGET_REPO="rossoctl/automation"
+REPORT_TARGET_OWNER="${REPORT_TARGET_REPO%%/*}"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="automation-health/link-health.md"
 
@@ -51,8 +52,8 @@ REPORT_TARGET_PATH="automation-health/link-health.md"
 SOURCE_REPO="rossoctl/automation"
 
 # Clone dir for the report target: honor an explicit MAIN_REPO_DIR override,
-# else derive from REPOS_DIR.
-REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
+# else derive from the owner-namespaced layout ($REPOS_DIR/<owner>/<name>).
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME}"
 
 # Fork remote name for the report-target push. Derived from the profile so it
 # carries no org literal; a stale remote of this name is corrected below.
@@ -468,7 +469,7 @@ else
   if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
     echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
     echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
-    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME"
     exit 1
   fi
 
