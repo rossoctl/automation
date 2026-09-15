@@ -441,7 +441,6 @@ if [ -f "$REPORTS_DIR/latest.json" ]; then
 
       gap_repo=$(echo "$gap" | jq -r '.repo')
       gap_ecosystems=$(echo "$gap" | jq -r '.ecosystems | join(",")')
-      full_gap_repo="$gap_repo"
 
       echo "  $gap_repo: missing config (ecosystems: $gap_ecosystems)"
 
@@ -465,7 +464,7 @@ if [ -f "$REPORTS_DIR/latest.json" ]; then
           branch_name="chore/add-dependabot-config"
 
           # Check if PR already exists
-          existing_pr=$(gh pr list --repo "$full_gap_repo" --state open \
+          existing_pr=$(gh pr list --repo "$gap_repo" --state open \
             --search "dependabot.yml in:title" --json number --jq '.[0].number' 2>/dev/null || echo "")
 
           if [ -n "$existing_pr" ] && [ "$existing_pr" != "null" ]; then
