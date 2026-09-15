@@ -25,19 +25,12 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
-    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
-    --repos-dir) REPOS_DIR_FLAG="$2"; shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
-# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP. Issue reads use canonical $ORG/<name>; $MAIN_REPO
-# backs the related-issue refs and the escalation URL. The report PR itself
-# targets $REPORT_TARGET_REPO (see the report-destination block below).
-load_org_profile
+# Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
+repoman_config
 
 # --- Configuration ---
 REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
@@ -48,13 +41,19 @@ REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
 # file, overwritten in place each run: trend tooling reconstructs history by
 # replaying git commit parents, so we store state (not dated snapshots) and
 # avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
-REPORT_TARGET_REPO="$ORG/automation"
+# TODO(RepoMan Phase 2): move report_target_repo to programs/link-health.json.
+REPORT_TARGET_REPO="rossoctl/automation"
+REPORT_TARGET_OWNER="${REPORT_TARGET_REPO%%/*}"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="automation-health/link-health.md"
 
+# Standing-orders / attribution repo for the PR body's program link.
+# TODO(RepoMan Phase 2): move source_repo to programs/link-health.json.
+SOURCE_REPO="rossoctl/automation"
+
 # Clone dir for the report target: honor an explicit MAIN_REPO_DIR override,
-# else derive from REPOS_DIR.
-REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
+# else derive from the owner-namespaced layout ($REPOS_DIR/<owner>/<name>).
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME}"
 
 # Fork remote name for the report-target push. Derived from the profile so it
 # carries no org literal; a stale remote of this name is corrected below.
@@ -87,35 +86,27 @@ REPOS_FAILED=0
 # Collect all broken links into a single JSONL file
 : > "$TMPDIR/broken.jsonl"
 
-# Track canonical repos already scanned this run, so duplicate clone dirs
-# (e.g. a stale "kagenti" alongside "rossoctl") are not scanned twice.
-SEEN_CANON=""
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. enrolled_clone_dirs emits each enrolled owner/name
+# whose clone exists; the here-string keeps the body in the current shell so
+# counters accumulate.
+ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
-for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
-  [ -d "$repo_dir" ] || continue
-  repo_name=$(basename "$repo_dir")
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
+  repo_dir="$REPOS_DIR/$full_repo"
 
-  # Skip hidden dirs (except .github) and non-git dirs
-  if [[ "$repo_name" == .* && "$repo_name" != ".github" ]] || [ ! -d "$repo_dir/.git" ]; then
-    continue
-  fi
+  echo "Scanning $full_repo..."
 
-  # Restrict to core repos (allowlist), mapping pre-rename dir names to their
-  # canonical repo first. Non-core / archived clones are skipped.
-  canon=$(canonical_repo_for_dir "$repo_name")
-  if ! is_core_repo "$canon"; then
-    continue
-  fi
-
-  # Dedup: skip if another clone dir already covered this canonical repo.
-  case " $SEEN_CANON " in
-    *" $canon "*) echo "Skipping $repo_name (already scanned as $canon)"; continue ;;
-  esac
-  SEEN_CANON="$SEEN_CANON $canon"
-
-  echo "Scanning $repo_name (as $ORG/$canon)..."
-
-  LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
+  # Key the temp file on the full owner/name (slash flattened to _), not the
+  # bare name: rossoctl/cortex and alice/cortex share a bare name, and keying
+  # on it would make the second scan overwrite the first (the [ ! -s ] guard
+  # cannot catch it -- the file is non-empty). That same-name-different-owner
+  # case is exactly what the owner-namespaced model exists to support.
+  safe_repo="${full_repo//\//_}"
+  LYCHEE_OUTPUT="$TMPDIR/lychee_${safe_repo}.json"
 
   # Run lychee -- scanner-level args applied to all repos
   LYCHEE_SCANNER_ARGS=(
@@ -139,7 +130,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   fi
 
   if [ ! -s "$LYCHEE_OUTPUT" ]; then
-    echo "  WARN: lychee produced no output for $repo_name"
+    echo "  WARN: lychee produced no output for $full_repo"
     REPOS_FAILED=$((REPOS_FAILED + 1))
     continue
   fi
@@ -155,11 +146,11 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   # normalization logic lives in extract-broken-links.sh so it can be unit-tested
   # (see tests/test-extract-broken-links.sh).
   "$SCRIPT_DIR/extract-broken-links.sh" \
-    "$LYCHEE_OUTPUT" "$ORG/$canon" "$REPOS_DIR/$repo_name/" \
+    "$LYCHEE_OUTPUT" "$full_repo" "$repo_dir" \
     >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
 
   echo "  Links: $repo_total, Errors: $repo_errors"
-done
+done <<< "$CLONES"
 
 echo ""
 echo "=== Scan complete ==="
@@ -381,7 +372,7 @@ TREND_TABLE=$(jq -r '
 
 # Build per-repo breakdown with issue counts
 # Single org-wide query for all open scanner issues, then count client-side
-issue_search=$(gh_with_backoff search issues "org:$ORG in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
+issue_search=$(gh_with_backoff search issues "org:${REPORT_TARGET_REPO%%/*} in:title \"Broken link in\" state:open" --json repository --jq '.[].repository.nameWithOwner' 2>/dev/null || true)
 # bash 3.2 (macOS default) has no associative arrays. Keep counts in a
 # newline-delimited accumulator of "repo<TAB>count" rows; repo keys are
 # owner/name (no whitespace), so tab-splitting is unambiguous.
@@ -483,7 +474,7 @@ else
   if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
     echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
     echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
-    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME"
     exit 1
   fi
 
@@ -529,7 +520,7 @@ Auto-updated by Rossoctl Link Health Scanner. This PR is continuously updated wi
 
 ## Related issue(s)
 
-- $MAIN_REPO#1178
+- $REPORT_TARGET_REPO#1178
 
 ## Automation program
 
@@ -552,7 +543,7 @@ if [ "$NEW_LINKS" -gt "$ESCALATION_THRESHOLD" ]; then
   echo ""
   echo "ALERT: Link health scan found $NEW_LINKS new broken links (threshold: $ESCALATION_THRESHOLD)."
   echo "This may indicate a bulk documentation change or a widespread external service outage."
-  echo "Review issues at https://github.com/$MAIN_REPO/issues?q=label:broken-link"
+  echo "Review issues at https://github.com/$REPORT_TARGET_REPO/issues?q=label:broken-link"
 fi
 
 # --- Summary ---

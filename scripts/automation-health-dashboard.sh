@@ -28,9 +28,6 @@ while [[ $# -gt 0 ]]; do
     --live) DRY_RUN=false; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
     --main-repo-dir) MAIN_REPO_DIR="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
-    --fork-owner) FORK_OWNER_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -53,9 +50,6 @@ Options:
   --reports-dir DIR    Base reports directory (default: $REPORTS_DIR or ./reports)
   --main-repo-dir DIR  Path to the report-target repo clone, overriding the
                        REPOS_DIR-derived default (default: $MAIN_REPO_DIR)
-  --profile NAME       Org profile to load (config/org.<name>.env; default org.env)
-  --org NAME           GitHub org (default: from profile, config/org.env)
-  --fork-owner NAME    Fork owner for PR workflow (default: from profile)
   --verbose            Print diagnostic output
   --help, -h           Show this help
 
@@ -68,9 +62,8 @@ HELP
   exit 0
 fi
 
-# Resolve org identity (--flag > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP.
-load_org_profile
+# Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
+repoman_config
 
 # Report-PR destination. The org main repo's docs/ folder feeds the docs site
 # (rossoctl.dev) and cannot host machine-generated reports, so the standing
@@ -78,12 +71,15 @@ load_org_profile
 # file, overwritten in place each run: trend tooling reconstructs history by
 # replaying git commit parents, so we store state (not dated snapshots) and
 # avoid the files-vs-diffs-on-Git anti-pattern (rossoctl/automation#44).
-REPORT_TARGET_REPO="$ORG/automation"
+# TODO(RepoMan Phase 2): move report_target_repo/source_repo to programs/health-dashboard.json.
+REPORT_TARGET_REPO="rossoctl/automation"
+SOURCE_REPO="rossoctl/automation"
+REPORT_TARGET_OWNER="${REPORT_TARGET_REPO%%/*}"
 REPORT_TARGET_NAME="${REPORT_TARGET_REPO##*/}"
 REPORT_TARGET_PATH="automation-health/automation-health.md"
 # Clone dir for the report target: honor an explicit --main-repo-dir/MAIN_REPO_DIR
-# override, else derive from REPOS_DIR.
-REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_NAME}"
+# override, else derive from the owner-namespaced layout ($REPOS_DIR/<owner>/<name>).
+REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME}"
 
 # --- Validate inputs ---
 if [ -z "${REPORTS_DIR:-}" ]; then
@@ -310,13 +306,17 @@ lh_repos=""
 db_repos=""
 
 if [ "$HAS_LINK_HEALTH" = true ]; then
-  lh_repos=$(jq -r '[.broken[].repo] | unique | .[] | split("/")[1]' "$LINK_SCAN_DIR/latest.json" 2>/dev/null | sort -u || true)
+  # .repo is the full owner/name ref (extract-broken-links.sh emits it verbatim).
+  # Key on the full ref so it matches db_repos below -- stripping the owner here
+  # would make the two program sets un-mergeable (no repo could match both).
+  lh_repos=$(jq -r '[.broken[].repo] | unique | .[]' "$LINK_SCAN_DIR/latest.json" 2>/dev/null | sort -u || true)
   # Also include repos scanned (from history, repos_scanned is a count not a list)
   # Fall back to broken repos as proxy for "scanned repos"
 fi
 
 if [ "$HAS_DEP_BUMP" = true ]; then
-  # Repos with dependabot activity
+  # Repos with dependabot activity -- .repo is the full owner/name ref, same
+  # shape as lh_repos, so the sort -u merge and grep -qxF cross-check align.
   db_repos=$(jq -r '([.stale_prs[].repo] + [.coverage_gaps[].repo]) | unique | .[]' "$DEP_BUMP_DIR/latest.json" 2>/dev/null | sort -u || true)
 fi
 
@@ -459,7 +459,7 @@ else
   if [ ! -d "$REPORT_TARGET_DIR/.git" ]; then
     echo "ERROR: $REPORT_TARGET_DIR does not appear to be a git repository."
     echo "Export MAIN_REPO_DIR or set REPOS_DIR so $REPORT_TARGET_REPO can be found:"
-    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_NAME"
+    echo "  export MAIN_REPO_DIR=$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARGET_NAME"
     exit 1
   fi
 
@@ -507,7 +507,7 @@ Auto-updated by Rossoctl Automation Health Dashboard. This PR is continuously up
 
 ## Related issue(s)
 
-- $MAIN_REPO#1260
+- $REPORT_TARGET_REPO#1260
 
 ## Automation program
 

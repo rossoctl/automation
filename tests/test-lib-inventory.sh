@@ -8,21 +8,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 
 WANT="append_history_row
 atomic_write_file
-canonical_repo_for_dir
 close_issue_if_valid
-core_repo_names
 create_fork_pr
 diff_against_previous
+enrolled_clone_dirs
 ensure_fork
 generate_scan_id
-get_core_repos
 gh_issue_exists
 gh_with_backoff
-is_core_repo
+is_enrolled
+is_enrolled_in
 iso_to_epoch
 issue_has_open_pr
-load_org_profile
 pick_best_candidate
+repoman_config
+repoman_get_repos
+repoman_load_enrolled
 score_path_suffix
 setup_workspace
 validate_issue_fields
@@ -37,7 +38,7 @@ GOT=$(
 )
 
 if [ "$GOT" = "$WANT" ]; then
-  echo "PASS: lib function inventory (23 functions, none lost/renamed)"
+  echo "PASS: lib function inventory (24 functions, none lost/renamed)"
   exit 0
 else
   echo "FAIL: lib function inventory mismatch"

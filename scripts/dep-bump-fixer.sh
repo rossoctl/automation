@@ -28,8 +28,6 @@ while [[ $# -gt 0 ]]; do
     --dry-run) DRY_RUN=true; shift ;;
     --live) DRY_RUN=false; shift ;;
     --issue-limit) ISSUE_LIMIT="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -47,8 +45,6 @@ OPTIONS:
   --dry-run         Analyze and preview comments only (default)
   --live            Post comments on PRs and issues
   --issue-limit N   Process at most N issues (default: 5)
-  --profile NAME    Org profile to load (config/org.<name>.env; default org.env)
-  --org NAME        GitHub org (default: from profile, config/org.env)
   --verbose         Print additional diagnostic output
   --help, -h        Show this help
 
@@ -62,10 +58,8 @@ USAGE
   exit 0
 fi
 
-# Resolve org identity (--org > env > profile > default). Sets ORG, FORK_OWNER,
-# MAIN_REPO, REPOS_DIR, REMAP. Reads use canonical $ORG/<name>; write paths
-# (fork PRs) derive from $ORG/$FORK_OWNER.
-load_org_profile
+# Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
+repoman_config
 
 # --- Configuration ---
 validate_repos_dir "${REPOS_DIR:-}"
@@ -89,7 +83,6 @@ mkdir -p "$REPORTS_DIR"
 SCAN_ID=$(generate_scan_id "$REPORTS_DIR" "$SCAN_DATE")
 
 echo "=== Dep Bump Fixer $SCAN_ID ==="
-echo "Org: $ORG"
 echo "Repos dir: $REPOS_DIR"
 echo "Reports dir: $REPORTS_DIR"
 if [ "$DRY_RUN" = true ]; then echo "Mode: DRY RUN (no comments posted)"; else echo "Mode: LIVE"; fi
@@ -102,33 +95,23 @@ if [ ! -f "$REPORTS_DIR/baseline.json" ]; then
 
   # Query merged Dependabot PRs across all repos (last 90 days)
   : > "$TMPDIR/merged_prs.jsonl"
-  SEEN_CANON=""
-  for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
-    [ -d "$repo_dir" ] || continue
-    repo_name=$(basename "$repo_dir")
-    if [[ "$repo_name" == .* && "$repo_name" != ".github" ]] || [ ! -d "$repo_dir/.git" ]; then
-      continue
-    fi
+  # Drive the loop from the enrolled set (authoritative), statting each clone,
+  # rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+  # drops a ".github" repo. The here-string keeps the body in the current shell.
+  ENROLLED=$(repoman_load_enrolled) || exit 1
+  CLONES=$(enrolled_clone_dirs "$ENROLLED")
+  while IFS= read -r full_repo; do
+    [ -n "$full_repo" ] || continue
 
-    # Core-repo allowlist + canonical remap + dedup of duplicate clone dirs.
-    canon=$(canonical_repo_for_dir "$repo_name")
-    if ! is_core_repo "$canon"; then
-      continue
-    fi
-    case " $SEEN_CANON " in
-      *" $canon "*) continue ;;
-    esac
-    SEEN_CANON="$SEEN_CANON $canon"
-
-    gh pr list --repo "$ORG/$canon" \
+    gh pr list --repo "$full_repo" \
       --author "app/dependabot" \
       --state merged \
       --json number,createdAt,mergedAt \
-      --limit 50 2>/dev/null | jq -c --arg repo "$repo_name" \
+      --limit 50 2>/dev/null | jq -c --arg repo "$full_repo" \
       '.[] | . + {repo: $repo}' >> "$TMPDIR/merged_prs.jsonl" 2>/dev/null || true
 
     sleep 0.5
-  done
+  done <<< "$CLONES"
 
   # Compute baseline metrics
   total_merged=$(wc -l < "$TMPDIR/merged_prs.jsonl" | tr -d ' ')
@@ -169,26 +152,18 @@ echo "--- Discovering scanner issues ---"
 : > "$TMPDIR/issues.jsonl"
 REPOS_CHECKED=0
 
-SEEN_CANON=""
-for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
-  [ -d "$repo_dir" ] || continue
-  repo_name=$(basename "$repo_dir")
-  if [[ "$repo_name" == .* && "$repo_name" != ".github" ]] || [ ! -d "$repo_dir/.git" ]; then
-    continue
-  fi
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. enrolled_clone_dirs emits each enrolled owner/name
+# whose clone exists; the here-string keeps the body in the current shell so
+# counters accumulate.
+ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
-  # Core-repo allowlist + canonical remap + dedup of duplicate clone dirs.
-  canon=$(canonical_repo_for_dir "$repo_name")
-  if ! is_core_repo "$canon"; then
-    continue
-  fi
-  case " $SEEN_CANON " in
-    *" $canon "*) continue ;;
-  esac
-  SEEN_CANON="$SEEN_CANON $canon"
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
 
   REPOS_CHECKED=$((REPOS_CHECKED + 1))
-  full_repo="$ORG/$canon"
 
   issues_json=$(gh issue list --repo "$full_repo" \
     --search "[dep-bump] in:title" \
@@ -202,7 +177,7 @@ for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
   fi
 
   sleep 0.3
-done
+done <<< "$CLONES"
 
 TOTAL_ISSUES=$(wc -l < "$TMPDIR/issues.jsonl" | tr -d ' ')
 echo "Found $TOTAL_ISSUES open scanner issues across $REPOS_CHECKED repos"
@@ -466,7 +441,6 @@ if [ -f "$REPORTS_DIR/latest.json" ]; then
 
       gap_repo=$(echo "$gap" | jq -r '.repo')
       gap_ecosystems=$(echo "$gap" | jq -r '.ecosystems | join(",")')
-      full_gap_repo="$ORG/$gap_repo"
 
       echo "  $gap_repo: missing config (ecosystems: $gap_ecosystems)"
 
@@ -490,7 +464,7 @@ if [ -f "$REPORTS_DIR/latest.json" ]; then
           branch_name="chore/add-dependabot-config"
 
           # Check if PR already exists
-          existing_pr=$(gh pr list --repo "$full_gap_repo" --state open \
+          existing_pr=$(gh pr list --repo "$gap_repo" --state open \
             --search "dependabot.yml in:title" --json number --jq '.[0].number' 2>/dev/null || echo "")
 
           if [ -n "$existing_pr" ] && [ "$existing_pr" != "null" ]; then
@@ -511,8 +485,8 @@ if [ -f "$REPORTS_DIR/latest.json" ]; then
             if git diff --cached --quiet; then
               echo "no"
             else
-              ensure_fork "$ORG" "$gap_repo" "$FORK_OWNER"
-              if create_fork_pr "$ORG" "$gap_repo" "$FORK_OWNER" "$branch_name" \
+              ensure_fork "${gap_repo%%/*}" "${gap_repo#*/}" "$FORK_OWNER"
+              if create_fork_pr "${gap_repo%%/*}" "${gap_repo#*/}" "$FORK_OWNER" "$branch_name" \
                 "chore: Add Dependabot configuration" \
                 "chore: Add Dependabot configuration for $gap_repo" \
                 "Enable automated dependency updates with weekly schedule and grouped minor/patch updates.
@@ -545,33 +519,23 @@ echo "--- Computing metrics ---"
 
 # Query recently merged Dependabot PRs (last 30 days) for TTM
 : > "$TMPDIR/recent_merged.jsonl"
-SEEN_CANON_TTM=""
-for repo_dir in "$REPOS_DIR"/*/ "$REPOS_DIR"/.github/; do
-  [ -d "$repo_dir" ] || continue
-  repo_name=$(basename "$repo_dir")
-  if [[ "$repo_name" == .* && "$repo_name" != ".github" ]] || [ ! -d "$repo_dir/.git" ]; then
-    continue
-  fi
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. The here-string keeps the body in the current shell.
+ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
 
-  # Core-repo allowlist + canonical remap + dedup of duplicate clone dirs.
-  canon=$(canonical_repo_for_dir "$repo_name")
-  if ! is_core_repo "$canon"; then
-    continue
-  fi
-  case " $SEEN_CANON_TTM " in
-    *" $canon "*) continue ;;
-  esac
-  SEEN_CANON_TTM="$SEEN_CANON_TTM $canon"
-
-  gh pr list --repo "$ORG/$canon" \
+  gh pr list --repo "$full_repo" \
     --author "app/dependabot" \
     --state merged \
     --json number,createdAt,mergedAt \
-    --limit 20 2>/dev/null | jq -c --arg repo "$repo_name" \
+    --limit 20 2>/dev/null | jq -c --arg repo "$full_repo" \
     '.[] | . + {repo: $repo}' >> "$TMPDIR/recent_merged.jsonl" 2>/dev/null || true
 
   sleep 0.3
-done
+done <<< "$CLONES"
 
 # Compute median time-to-merge
 MERGED_SINCE_LAST=0
@@ -617,7 +581,6 @@ FIXER_LATEST=$(jq -nc \
   --arg scan_id "$SCAN_ID" \
   --arg date "$SCAN_TIME" \
   --argjson duration "$SECONDS" \
-  --arg org "$ORG" \
   --argjson issues_processed "$ISSUES_PROCESSED" \
   --argjson comments_posted "$COMMENTS_POSTED" \
   --argjson issues_closed "$ISSUES_CLOSED" \
@@ -632,7 +595,7 @@ FIXER_LATEST=$(jq -nc \
   --argjson stale_count "$CURRENT_STALE" \
   --argjson baseline_ttm "$BASELINE_TTM" \
   --argjson baseline_stale "$BASELINE_STALE" \
-  '{scan_id: $scan_id, date: $date, duration_seconds: $duration, org: $org,
+  '{scan_id: $scan_id, date: $date, duration_seconds: $duration,
     issues_processed: $issues_processed, comments_posted: $comments_posted,
     issues_closed: $issues_closed, config_prs_created: $config_prs,
     breakdown: {security: $security, routine: $routine, major: $major},

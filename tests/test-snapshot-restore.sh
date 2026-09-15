@@ -2,15 +2,16 @@
 set -euo pipefail
 
 # Verifies snapshot/restore.sh --dry-run (the testable unit):
-#   - prints an ordered plan derived from manifest.json + the org profile
-#   - clones each repo from its RECORDED origin (not a re-derived $ORG/<name>)
-#   - falls back to $ORG/<name> ONLY when a repo has no recorded origin
+#   - prints an ordered plan derived from manifest.json + repoman config
+#   - clones each repo from its RECORDED origin (not a re-derived owner/name URL)
+#   - falls back to https://github.com/<owner>/<name> reconstructed from the
+#     recorded name ONLY when a repo has no recorded origin
 #   - names the captured OpenClaw version, a `checkout <branch>`, the service
 #     unit, extract + `openclaw backup verify` (NOT a `backup restore` subcommand)
 #   - creates NOTHING under REPOS_DIR (dry-run mutates nothing)
-# Hermetic: hand-authored manifest.json + empty state/secrets files, a fake org
-# profile via $ORG_PROFILE_FILE/$CORE_REPOS_FILE, a temp REPOS_DIR. No network,
-# no real host, no real openclaw/age/git clone.
+# Hermetic: hand-authored manifest.json + empty state/secrets files, fake
+# enrolled repos via $REPOMAN_REPOS_FILE/$REPOMAN_CONFIG_FILE, a temp REPOS_DIR.
+# No network, no real host, no real openclaw/age/git clone.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESTORE_SH="$SCRIPT_DIR/../snapshot/restore.sh"
@@ -19,21 +20,21 @@ TEST_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TEST_TMPDIR"' EXIT
 fail=0
 
-# Fake org profile: ORG=acme (used for the empty-origin fallback only).
-cat > "$TEST_TMPDIR/org.env" <<'EOF'
-PROFILE_ORG=acme
-PROFILE_FORK_OWNER=acmefork
-PROFILE_REMAP=""
-EOF
-
-# Core repo allowlist (matches the manifest's repo names).
-cat > "$TEST_TMPDIR/core.txt" <<'EOF'
-tool-one
-tool-two
-EOF
-
 REPOS_DIR="$TEST_TMPDIR/repos"
 mkdir -p "$REPOS_DIR"
+
+# Enrolled repos (used for symmetry/future-proofing; restore.sh reads the
+# manifest, not this file, but repoman_config still needs config.json).
+cat > "$TEST_TMPDIR/repos.json" <<'EOF'
+[
+  { "owner": "someowner", "name": "tool-one" },
+  { "owner": "someowner", "name": "tool-two" }
+]
+EOF
+
+cat > "$TEST_TMPDIR/config.json" <<EOF
+{ "repos_dir": "$REPOS_DIR", "fork_owner": "someownerfork" }
+EOF
 
 # The snapshot dir being restored FROM.
 SNAP="$TEST_TMPDIR/snap"
@@ -41,7 +42,7 @@ mkdir -p "$SNAP"
 
 # Hand-authored manifest:
 #   tool-one -> recorded origin owned by someone else, on feat/x
-#   tool-two -> NO recorded origin (empty) -> must use the $ORG fallback
+#   tool-two -> NO recorded origin (empty) -> must reconstruct from owner/name
 NONACME_ORIGIN="git@github.com:someone-else/tool-one.git"
 cat > "$SNAP/manifest.json" <<EOF
 {
@@ -50,8 +51,8 @@ cat > "$SNAP/manifest.json" <<EOF
   "gatewayPort": 18789,
   "serviceUnit": "openclaw-gateway.service",
   "repos": [
-    { "name": "tool-one", "origin": "$NONACME_ORIGIN", "branch": "feat/x", "dirty": true,  "unpushed": false },
-    { "name": "tool-two", "origin": "",                 "branch": "main",   "dirty": false, "unpushed": false }
+    { "name": "someowner/tool-one", "origin": "$NONACME_ORIGIN", "branch": "feat/x", "dirty": true,  "unpushed": false },
+    { "name": "someowner/tool-two", "origin": "",                 "branch": "main",   "dirty": false, "unpushed": false }
   ]
 }
 EOF
@@ -63,8 +64,8 @@ EOF
 # Run the dry-run planner; capture the plan. Tolerate a nonzero exit so a
 # missing script surfaces as a FAIL assertion rather than aborting under set -e.
 plan=$(
-  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
-  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+  REPOMAN_CONFIG_FILE="$TEST_TMPDIR/config.json" \
   REPOS_DIR="$REPOS_DIR" \
   bash "$RESTORE_SH" --from "$SNAP" --dry-run 2>&1
 ) || true
@@ -75,19 +76,19 @@ if ! printf '%s\n' "$plan" | grep -Fq "2026.5.12"; then
   fail=1
 fi
 
-# tool-one must clone from its RECORDED origin, not acme/tool-one.
+# tool-one must clone from its RECORDED origin, not a reconstructed URL.
 if ! printf '%s\n' "$plan" | grep -Fq "$NONACME_ORIGIN"; then
   echo "FAIL restore: tool-one not cloned from its recorded origin"
   fail=1
 fi
-if printf '%s\n' "$plan" | grep -Eq 'acme[:/]tool-one'; then
-  echo "FAIL restore: tool-one wrongly cloned from an \$ORG-derived URL"
+if printf '%s\n' "$plan" | grep -Fq "github.com/someowner/tool-one"; then
+  echo "FAIL restore: tool-one wrongly cloned from a reconstructed URL instead of its recorded origin"
   fail=1
 fi
 
-# tool-two has no recorded origin -> must fall back to the $ORG namespace.
-if ! printf '%s\n' "$plan" | grep -Eq 'acme[:/]tool-two'; then
-  echo "FAIL restore: tool-two not cloned from the \$ORG fallback (acme/tool-two)"
+# tool-two has no recorded origin -> reconstruct from its enrolled owner/name.
+if ! printf '%s\n' "$plan" | grep -Fq "github.com/someowner/tool-two.git"; then
+  echo "FAIL restore: tool-two not cloned from the reconstructed owner/name URL"
   fail=1
 fi
 
@@ -122,8 +123,8 @@ fi
 
 # Missing --from must fail loud.
 if (
-  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
-  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+  REPOMAN_CONFIG_FILE="$TEST_TMPDIR/config.json" \
   REPOS_DIR="$REPOS_DIR" \
   bash "$RESTORE_SH" --dry-run
 ) >/dev/null 2>&1; then
@@ -135,8 +136,8 @@ fi
 EMPTY_SNAP="$TEST_TMPDIR/empty-snap"
 mkdir -p "$EMPTY_SNAP"
 if (
-  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
-  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+  REPOMAN_CONFIG_FILE="$TEST_TMPDIR/config.json" \
   REPOS_DIR="$REPOS_DIR" \
   bash "$RESTORE_SH" --from "$EMPTY_SNAP" --dry-run
 ) >/dev/null 2>&1; then
@@ -184,8 +185,8 @@ done
 (
   PATH="$INJ_BIN:$PATH" \
   AGE_IDENTITY="/dev/null" \
-  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
-  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+  REPOMAN_CONFIG_FILE="$TEST_TMPDIR/config.json" \
   REPOS_DIR="$REPOS_DIR" \
   bash "$RESTORE_SH" --from "$INJ_SNAP"
 ) >/dev/null 2>&1 || true
@@ -219,8 +220,8 @@ EOF
 (
   PATH="$INJ_BIN:$PATH" \
   AGE_IDENTITY="/dev/null" \
-  ORG_PROFILE_FILE="$TEST_TMPDIR/org.env" \
-  CORE_REPOS_FILE="$TEST_TMPDIR/core.txt" \
+  REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+  REPOMAN_CONFIG_FILE="$TEST_TMPDIR/config.json" \
   REPOS_DIR="$REPOS_DIR" \
   bash "$RESTORE_SH" --from "$Q_SNAP"
 ) >/dev/null 2>&1 || true
@@ -231,7 +232,7 @@ if [ -e "$Q_CANARY" ]; then
 fi
 
 if [ "$fail" -eq 0 ]; then
-  echo "PASS: snapshot-restore (dry-run plan: recorded-origin clone, \$ORG fallback, verify-not-restore, injection-safe)"
+  echo "PASS: snapshot-restore (dry-run plan: recorded-origin clone, owner/name fallback, verify-not-restore, injection-safe)"
 else
   exit 1
 fi

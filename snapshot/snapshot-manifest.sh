@@ -15,11 +15,11 @@ set -euo pipefail
 # secret file contents.
 #
 # Discussion #62 (owner-vs-org identity): each repo's `origin` is read from the
-# clone's REAL `git remote get-url origin`, never rebuilt as "$ORG/<name>". The
-# origin is the authoritative clone identity; the bare name is only a locator.
-# So a repo owned by an individual rather than the org is captured faithfully,
-# and the manifest stays correct whether or not core-repos.txt later grows from
-# bare names to full OWNER/repo slugs.
+# clone's REAL `git remote get-url origin`, never rebuilt from the repo name.
+# The origin is the authoritative clone identity; the recorded owner/name is
+# only a locator and a last-resort fallback. So a repo owned by an individual
+# rather than an org is captured faithfully, and the manifest stays correct now
+# that repos.json carries full OWNER/name slugs.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
@@ -49,8 +49,9 @@ if [ -z "$OUTDIR" ]; then
   exit 1
 fi
 
-# Resolve org identity and validate the repos directory before touching clones.
-load_org_profile
+# Resolve deployment constants (repos_dir) from ~/.repoman/config.json,
+# then validate the repos directory before touching clones.
+repoman_config
 validate_repos_dir "$REPOS_DIR"
 
 mkdir -p "$OUTDIR"
@@ -63,8 +64,9 @@ node_version=$(read_node_version || echo "unknown")
 gateway_port="${GATEWAY_PORT:-18789}"
 service_unit="${SERVICE_UNIT:-openclaw-gateway.service}"
 
-# Collect per-repo git state into a JSON array, one object per core repo that
-# exists as a clone under $REPOS_DIR. Absent clones are skipped.
+# Collect per-repo git state into a JSON array, one object per ENROLLED repo
+# (owner/name) that exists as a clone under $REPOS_DIR/<owner>/<name>. Absent
+# clones are skipped.
 repos_json="[]"
 while IFS= read -r name; do
   # Skip blank lines defensively.
@@ -80,7 +82,7 @@ while IFS= read -r name; do
   fi
 
   # origin: the REAL remote URL, or empty when the clone has no origin.
-  # (#62: never reconstruct this from $ORG.)
+  # (#62: never reconstruct this from the repo name.)
   origin=$(git -C "$repo_dir" remote get-url origin 2>/dev/null || echo "")
 
   # branch: the checked-out branch name (or a detached-HEAD marker).
@@ -118,7 +120,7 @@ while IFS= read -r name; do
     '{name: $name, origin: $origin, branch: $branch, dirty: $dirty, unpushed: $unpushed}')
   repos_json=$(printf '%s\n' "$repos_json" | jq --argjson obj "$repo_obj" '. + [$obj]')
 done <<EOF
-$(core_repo_names)
+$(repoman_get_repos)
 EOF
 
 # Assemble the manifest.
@@ -182,7 +184,7 @@ while [ "$i" -lt "$repo_count" ]; do
   if [ -n "$r_origin" ]; then
     clone_target="clone \`$r_origin\`"
   else
-    clone_target="clone (no origin recorded; fall back to \$ORG/$r_name)"
+    clone_target="clone (no origin recorded; fall back to https://github.com/$r_name.git)"
   fi
 
   line="- \`$r_name\` -> $clone_target, checkout \`$r_branch\`"

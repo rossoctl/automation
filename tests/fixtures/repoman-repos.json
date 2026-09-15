@@ -1,0 +1,5 @@
+[
+  {"owner": "rossoctl", "name": "automation"},
+  {"owner": "rossoctl", "name": "cortex"},
+  {"owner": "alice",    "name": "cortex"}
+]
