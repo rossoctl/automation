@@ -95,27 +95,23 @@ if [ ! -f "$REPORTS_DIR/baseline.json" ]; then
 
   # Query merged Dependabot PRs across all repos (last 90 days)
   : > "$TMPDIR/merged_prs.jsonl"
-  # Load the enrolled set once; membership is then an in-memory check per repo.
+  # Drive the loop from the enrolled set (authoritative), statting each clone,
+  # rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+  # drops a ".github" repo. The here-string keeps the body in the current shell.
   ENROLLED=$(repoman_load_enrolled) || exit 1
-  for owner_dir in "$REPOS_DIR"/*/; do
-    [ -d "$owner_dir" ] || continue
-    owner=$(basename "$owner_dir")
-    for repo_dir in "$owner_dir"*/; do
-      [ -d "$repo_dir/.git" ] || continue
-      repo_name=$(basename "$repo_dir")
-      full_repo="$owner/$repo_name"
-      is_enrolled_in "$full_repo" "$ENROLLED" || continue
+  CLONES=$(enrolled_clone_dirs "$ENROLLED")
+  while IFS= read -r full_repo; do
+    [ -n "$full_repo" ] || continue
 
-      gh pr list --repo "$full_repo" \
-        --author "app/dependabot" \
-        --state merged \
-        --json number,createdAt,mergedAt \
-        --limit 50 2>/dev/null | jq -c --arg repo "$repo_name" \
-        '.[] | . + {repo: $repo}' >> "$TMPDIR/merged_prs.jsonl" 2>/dev/null || true
+    gh pr list --repo "$full_repo" \
+      --author "app/dependabot" \
+      --state merged \
+      --json number,createdAt,mergedAt \
+      --limit 50 2>/dev/null | jq -c --arg repo "$full_repo" \
+      '.[] | . + {repo: $repo}' >> "$TMPDIR/merged_prs.jsonl" 2>/dev/null || true
 
-      sleep 0.5
-    done
-  done
+    sleep 0.5
+  done <<< "$CLONES"
 
   # Compute baseline metrics
   total_merged=$(wc -l < "$TMPDIR/merged_prs.jsonl" | tr -d ' ')
@@ -156,35 +152,32 @@ echo "--- Discovering scanner issues ---"
 : > "$TMPDIR/issues.jsonl"
 REPOS_CHECKED=0
 
-# Load the enrolled set once; membership is then an in-memory check per repo
-# (is_enrolled_in) rather than a repos.json re-parse per iteration.
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. enrolled_clone_dirs emits each enrolled owner/name
+# whose clone exists; the here-string keeps the body in the current shell so
+# counters accumulate.
 ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
-for owner_dir in "$REPOS_DIR"/*/; do
-  [ -d "$owner_dir" ] || continue
-  owner=$(basename "$owner_dir")
-  for repo_dir in "$owner_dir"*/; do
-    [ -d "$repo_dir/.git" ] || continue
-    repo_name=$(basename "$repo_dir")
-    full_repo="$owner/$repo_name"
-    is_enrolled_in "$full_repo" "$ENROLLED" || continue
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
 
-    REPOS_CHECKED=$((REPOS_CHECKED + 1))
+  REPOS_CHECKED=$((REPOS_CHECKED + 1))
 
-    issues_json=$(gh issue list --repo "$full_repo" \
-      --search "[dep-bump] in:title" \
-      --state open --limit 100 \
-      --json number,title,body 2>/dev/null || echo "[]")
+  issues_json=$(gh issue list --repo "$full_repo" \
+    --search "[dep-bump] in:title" \
+    --state open --limit 100 \
+    --json number,title,body 2>/dev/null || echo "[]")
 
-    issue_count=$(echo "$issues_json" | jq 'length')
-    if [ "$issue_count" -gt 0 ]; then
-      echo "$issues_json" | jq -c --arg repo "$full_repo" '.[] | . + {repo: $repo}' \
-        >> "$TMPDIR/issues.jsonl"
-    fi
+  issue_count=$(echo "$issues_json" | jq 'length')
+  if [ "$issue_count" -gt 0 ]; then
+    echo "$issues_json" | jq -c --arg repo "$full_repo" '.[] | . + {repo: $repo}' \
+      >> "$TMPDIR/issues.jsonl"
+  fi
 
-    sleep 0.3
-  done
-done
+  sleep 0.3
+done <<< "$CLONES"
 
 TOTAL_ISSUES=$(wc -l < "$TMPDIR/issues.jsonl" | tr -d ' ')
 echo "Found $TOTAL_ISSUES open scanner issues across $REPOS_CHECKED repos"
@@ -527,27 +520,23 @@ echo "--- Computing metrics ---"
 
 # Query recently merged Dependabot PRs (last 30 days) for TTM
 : > "$TMPDIR/recent_merged.jsonl"
-# Load the enrolled set once; membership is then an in-memory check per repo.
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. The here-string keeps the body in the current shell.
 ENROLLED=$(repoman_load_enrolled) || exit 1
-for owner_dir in "$REPOS_DIR"/*/; do
-  [ -d "$owner_dir" ] || continue
-  owner=$(basename "$owner_dir")
-  for repo_dir in "$owner_dir"*/; do
-    [ -d "$repo_dir/.git" ] || continue
-    repo_name=$(basename "$repo_dir")
-    full_repo="$owner/$repo_name"
-    is_enrolled_in "$full_repo" "$ENROLLED" || continue
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
 
-    gh pr list --repo "$full_repo" \
-      --author "app/dependabot" \
-      --state merged \
-      --json number,createdAt,mergedAt \
-      --limit 20 2>/dev/null | jq -c --arg repo "$repo_name" \
-      '.[] | . + {repo: $repo}' >> "$TMPDIR/recent_merged.jsonl" 2>/dev/null || true
+  gh pr list --repo "$full_repo" \
+    --author "app/dependabot" \
+    --state merged \
+    --json number,createdAt,mergedAt \
+    --limit 20 2>/dev/null | jq -c --arg repo "$full_repo" \
+    '.[] | . + {repo: $repo}' >> "$TMPDIR/recent_merged.jsonl" 2>/dev/null || true
 
-    sleep 0.3
-  done
-done
+  sleep 0.3
+done <<< "$CLONES"
 
 # Compute median time-to-merge
 MERGED_SINCE_LAST=0

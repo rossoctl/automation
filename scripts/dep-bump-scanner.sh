@@ -100,61 +100,59 @@ echo "--- Detecting ecosystems ---"
 : > "$TMPDIR/ecosystems.jsonl"
 REPOS_SCANNED=0
 
-# Load the enrolled set once; membership is then an in-memory check per repo
-# (is_enrolled_in) rather than a repos.json re-parse per iteration.
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. enrolled_clone_dirs emits each enrolled owner/name
+# whose clone exists; the here-string keeps the body in the current shell so
+# counters accumulate.
 ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
-for owner_dir in "$REPOS_DIR"/*/; do
-  [ -d "$owner_dir" ] || continue
-  owner=$(basename "$owner_dir")
-  for repo_dir in "$owner_dir"*/; do
-    [ -d "$repo_dir/.git" ] || continue
-    repo_name=$(basename "$repo_dir")
-    full_repo="$owner/$repo_name"
-    is_enrolled_in "$full_repo" "$ENROLLED" || continue
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
+  repo_dir="$REPOS_DIR/$full_repo"
 
-    REPOS_SCANNED=$((REPOS_SCANNED + 1))
-    ecosystems=""
+  REPOS_SCANNED=$((REPOS_SCANNED + 1))
+  ecosystems=""
 
-    # Detect Python
-    if [ -f "$repo_dir/pyproject.toml" ] || [ -f "$repo_dir/setup.py" ] || [ -f "$repo_dir/requirements.txt" ]; then
-      ecosystems="${ecosystems}pip,"
-    fi
+  # Detect Python
+  if [ -f "$repo_dir/pyproject.toml" ] || [ -f "$repo_dir/setup.py" ] || [ -f "$repo_dir/requirements.txt" ]; then
+    ecosystems="${ecosystems}pip,"
+  fi
 
-    # Detect Node
-    if [ -f "$repo_dir/package.json" ]; then
-      ecosystems="${ecosystems}npm,"
-    fi
+  # Detect Node
+  if [ -f "$repo_dir/package.json" ]; then
+    ecosystems="${ecosystems}npm,"
+  fi
 
-    # Detect Go
-    if [ -f "$repo_dir/go.mod" ]; then
-      ecosystems="${ecosystems}gomod,"
-    fi
+  # Detect Go
+  if [ -f "$repo_dir/go.mod" ]; then
+    ecosystems="${ecosystems}gomod,"
+  fi
 
-    # Detect Rust
-    if [ -f "$repo_dir/Cargo.toml" ]; then
-      ecosystems="${ecosystems}cargo,"
-    fi
+  # Detect Rust
+  if [ -f "$repo_dir/Cargo.toml" ]; then
+    ecosystems="${ecosystems}cargo,"
+  fi
 
-    # Detect Docker (check recursively for Dockerfiles)
-    if find "$repo_dir" -maxdepth 3 -name "Dockerfile" -print -quit 2>/dev/null | grep -q .; then
-      ecosystems="${ecosystems}docker,"
-    fi
+  # Detect Docker (check recursively for Dockerfiles)
+  if find "$repo_dir" -maxdepth 3 -name "Dockerfile" -print -quit 2>/dev/null | grep -q .; then
+    ecosystems="${ecosystems}docker,"
+  fi
 
-    # Detect GitHub Actions
-    if find "$repo_dir/.github/workflows" -maxdepth 1 -name "*.yml" -print -quit 2>/dev/null | grep -q .; then
-      ecosystems="${ecosystems}github-actions,"
-    fi
+  # Detect GitHub Actions
+  if find "$repo_dir/.github/workflows" -maxdepth 1 -name "*.yml" -print -quit 2>/dev/null | grep -q .; then
+    ecosystems="${ecosystems}github-actions,"
+  fi
 
-    # Strip trailing comma
-    ecosystems="${ecosystems%,}"
+  # Strip trailing comma
+  ecosystems="${ecosystems%,}"
 
-    # Store the full owner/name so Step 2 builds correct refs directly.
-    jq -nc --arg repo "$full_repo" --arg eco "$ecosystems" \
-      '{repo: $repo, ecosystems: ($eco | split(",") | map(select(. != "")))}' \
-      >> "$TMPDIR/ecosystems.jsonl"
-  done
-done
+  # Store the full owner/name so Step 2 builds correct refs directly.
+  jq -nc --arg repo "$full_repo" --arg eco "$ecosystems" \
+    '{repo: $repo, ecosystems: ($eco | split(",") | map(select(. != "")))}' \
+    >> "$TMPDIR/ecosystems.jsonl"
+done <<< "$CLONES"
 
 echo "Detected ecosystems for $REPOS_SCANNED repos"
 

@@ -85,67 +85,66 @@ REPOS_FAILED=0
 # Collect all broken links into a single JSONL file
 : > "$TMPDIR/broken.jsonl"
 
-# Load the enrolled set once; membership is then an in-memory check per repo
-# (is_enrolled_in) rather than a repos.json re-parse per iteration.
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. enrolled_clone_dirs emits each enrolled owner/name
+# whose clone exists; the here-string keeps the body in the current shell so
+# counters accumulate.
 ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
-for owner_dir in "$REPOS_DIR"/*/; do
-  [ -d "$owner_dir" ] || continue
-  owner=$(basename "$owner_dir")
-  for repo_dir in "$owner_dir"*/; do
-    [ -d "$repo_dir/.git" ] || continue
-    repo_name=$(basename "$repo_dir")
-    full_repo="$owner/$repo_name"
-    is_enrolled_in "$full_repo" "$ENROLLED" || continue
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
+  repo_name="${full_repo#*/}"
+  repo_dir="$REPOS_DIR/$full_repo"
 
-    echo "Scanning $full_repo..."
+  echo "Scanning $full_repo..."
 
-    LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
+  LYCHEE_OUTPUT="$TMPDIR/lychee_${repo_name}.json"
 
-    # Run lychee -- scanner-level args applied to all repos
-    LYCHEE_SCANNER_ARGS=(
-      --format json
-      --scheme http --scheme https
-      --exclude 'localhost' --exclude '127\.0\.0\.1' --exclude 'localtest\.me'
-      --exclude 'example\.com' --exclude 'example\.org'
-      --exclude-all-private
-      --exclude-path 'node_modules' --exclude-path 'vendor' --exclude-path '\.claude'
-      --accept '200,204,206,403,429,502,503'
-      --exclude 'console\.cloud\.google\.com'
-      --timeout 10
-      --max-retries 2
-      --max-concurrency 8
-    )
+  # Run lychee -- scanner-level args applied to all repos
+  LYCHEE_SCANNER_ARGS=(
+    --format json
+    --scheme http --scheme https
+    --exclude 'localhost' --exclude '127\.0\.0\.1' --exclude 'localtest\.me'
+    --exclude 'example\.com' --exclude 'example\.org'
+    --exclude-all-private
+    --exclude-path 'node_modules' --exclude-path 'vendor' --exclude-path '\.claude'
+    --accept '200,204,206,403,429,502,503'
+    --exclude 'console\.cloud\.google\.com'
+    --timeout 10
+    --max-retries 2
+    --max-concurrency 8
+  )
 
-    if [ -f "$repo_dir/.lychee.toml" ]; then
-      lychee "${LYCHEE_SCANNER_ARGS[@]}" --config "$repo_dir/.lychee.toml" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
-    else
-      lychee "${LYCHEE_SCANNER_ARGS[@]}" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
-    fi
+  if [ -f "$repo_dir/.lychee.toml" ]; then
+    lychee "${LYCHEE_SCANNER_ARGS[@]}" --config "$repo_dir/.lychee.toml" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
+  else
+    lychee "${LYCHEE_SCANNER_ARGS[@]}" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
+  fi
 
-    if [ ! -s "$LYCHEE_OUTPUT" ]; then
-      echo "  WARN: lychee produced no output for $repo_name"
-      REPOS_FAILED=$((REPOS_FAILED + 1))
-      continue
-    fi
+  if [ ! -s "$LYCHEE_OUTPUT" ]; then
+    echo "  WARN: lychee produced no output for $repo_name"
+    REPOS_FAILED=$((REPOS_FAILED + 1))
+    continue
+  fi
 
-    # Parse results
-    repo_total=$(jq '.total // 0' "$LYCHEE_OUTPUT")
-    repo_errors=$(jq '.errors // 0' "$LYCHEE_OUTPUT")
-    TOTAL_LINKS=$((TOTAL_LINKS + repo_total))
-    TOTAL_ERRORS=$((TOTAL_ERRORS + repo_errors))
-    REPOS_SCANNED=$((REPOS_SCANNED + 1))
+  # Parse results
+  repo_total=$(jq '.total // 0' "$LYCHEE_OUTPUT")
+  repo_errors=$(jq '.errors // 0' "$LYCHEE_OUTPUT")
+  TOTAL_LINKS=$((TOTAL_LINKS + repo_total))
+  TOTAL_ERRORS=$((TOTAL_ERRORS + repo_errors))
+  REPOS_SCANNED=$((REPOS_SCANNED + 1))
 
-    # Extract broken links from the lychee report. The parsing/suppression/status
-    # normalization logic lives in extract-broken-links.sh so it can be unit-tested
-    # (see tests/test-extract-broken-links.sh).
-    "$SCRIPT_DIR/extract-broken-links.sh" \
-      "$LYCHEE_OUTPUT" "$full_repo" "$repo_dir" \
-      >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
+  # Extract broken links from the lychee report. The parsing/suppression/status
+  # normalization logic lives in extract-broken-links.sh so it can be unit-tested
+  # (see tests/test-extract-broken-links.sh).
+  "$SCRIPT_DIR/extract-broken-links.sh" \
+    "$LYCHEE_OUTPUT" "$full_repo" "$repo_dir" \
+    >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
 
-    echo "  Links: $repo_total, Errors: $repo_errors"
-  done
-done
+  echo "  Links: $repo_total, Errors: $repo_errors"
+done <<< "$CLONES"
 
 echo ""
 echo "=== Scan complete ==="

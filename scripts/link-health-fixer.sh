@@ -65,29 +65,25 @@ echo "=== Step 1: Gathering open scanner issues ==="
 ISSUES_FILE="$TMPDIR/issues.jsonl"
 : > "$ISSUES_FILE"
 
-# Load the enrolled set once; membership is then an in-memory check per repo
-# (is_enrolled_in) rather than a repos.json re-parse per iteration.
+# Drive the loop from the enrolled set (authoritative), statting each clone,
+# rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
+# drops a ".github" repo. enrolled_clone_dirs emits each enrolled owner/name
+# whose clone exists; the here-string keeps the body in the current shell.
 ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
 
-for owner_dir in "$REPOS_DIR"/*/; do
-  [ -d "$owner_dir" ] || continue
-  owner=$(basename "$owner_dir")
-  for repo_dir in "$owner_dir"*/; do
-    [ -d "$repo_dir/.git" ] || continue
-    repo_name=$(basename "$repo_dir")
-    full_repo="$owner/$repo_name"
-    is_enrolled_in "$full_repo" "$ENROLLED" || continue
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
 
-    issues_json=$(gh issue list --repo "$full_repo" \
-      --search "Broken link in:title" \
-      --state open --limit 100 \
-      --json number,title,body 2>/dev/null || echo "[]")
+  issues_json=$(gh issue list --repo "$full_repo" \
+    --search "Broken link in:title" \
+    --state open --limit 100 \
+    --json number,title,body 2>/dev/null || echo "[]")
 
-    # Add repository info since gh issue list doesn't include it
-    echo "$issues_json" | jq -c --arg repo "$full_repo" \
-      '.[] | . + {repository: {nameWithOwner: $repo}}' >> "$ISSUES_FILE" 2>/dev/null || true
-  done
-done
+  # Add repository info since gh issue list doesn't include it
+  echo "$issues_json" | jq -c --arg repo "$full_repo" \
+    '.[] | . + {repository: {nameWithOwner: $repo}}' >> "$ISSUES_FILE" 2>/dev/null || true
+done <<< "$CLONES"
 
 TOTAL_ISSUES=$(wc -l < "$ISSUES_FILE" | tr -d ' ')
 echo "Found $TOTAL_ISSUES open scanner issues"

@@ -131,19 +131,20 @@ their Phase 2 move to per-program config.
 
 All four share one idiom today: glob `"$REPOS_DIR"/*/`, map the basename through
 `canonical_repo_for_dir`, filter with `is_core_repo "$canon"`, dedup with `SEEN_CANON`. Under the
-new model each such loop becomes:
+new model each such loop is **driven from the enrolled set**, not from a filesystem glob: the
+`enrolled_clone_dirs` helper emits each enrolled `owner/name` whose clone exists under
+`$REPOS_DIR`, and the loop iterates those:
 
 ```bash
-for owner_dir in "$REPOS_DIR"/*/; do
-  owner=$(basename "$owner_dir")
-  for repo_dir in "$owner_dir"/*/; do
-    [ -d "$repo_dir/.git" ] || continue
-    name=$(basename "$repo_dir")
-    is_enrolled "$owner/$name" || continue
-    full_repo="$owner/$name"
-    ...
-  done
-done
+ENROLLED=$(repoman_load_enrolled) || exit 1
+CLONES=$(enrolled_clone_dirs "$ENROLLED")
+while IFS= read -r full_repo; do
+  [ -n "$full_repo" ] || continue
+  owner="${full_repo%%/*}"
+  name="${full_repo#*/}"
+  repo_dir="$REPOS_DIR/$full_repo"
+  ...
+done <<< "$CLONES"
 ```
 
 Notable simplifications:
@@ -151,12 +152,16 @@ Notable simplifications:
 - `canonical_repo_for_dir` and the `SEEN_CANON` dedup are gone. The owner namespace guarantees
   each enrolled repo maps to exactly one directory, so there is nothing to canonicalize or
   de-duplicate.
-- Every `$ORG/<name>` reconstruction becomes `$owner/$name`, where `owner` is read from the path
-  rather than assumed. The full owner/name reference is carried through, not rebuilt from a
+- Every `$ORG/<name>` reconstruction becomes `$owner/$name`, where `owner` comes from the enrolled
+  entry rather than assumed. The full owner/name reference is carried through, not rebuilt from a
   global.
 - Path joins `"$REPOS_DIR/$name"` become `"$REPOS_DIR/$owner/$name"`.
-- The `.github` special-case in the glob is dropped; `.github` is enrolled as
-  `<owner>/.github` like any other repo, and the two-level glob picks it up.
+- The `.github` special-case in the glob is dropped, and it is safe to drop **only because the loop
+  no longer globs**. `.github` is enrolled as `<owner>/.github` like any other repo, and driving
+  from the enrolled set picks it up. A `"$REPOS_DIR"/*/` glob would NOT: bash excludes
+  leading-dot entries unless `dotglob` is set, so a glob-and-filter loop silently drops `.github`.
+  Driving from enrollment makes the enrolled set authoritative and removes that whole
+  glob-vs-enrollment mismatch class.
 
 Per-script loop counts to convert: link-health-scanner (1), link-health-fixer (1),
 dep-bump-scanner (1), dep-bump-fixer (3). The dep-bump pair stores canonical names in

@@ -148,17 +148,19 @@ repoman_get_repos() {
 # Exact whole-line match (grep -Fx) to avoid substring false positives.
 # Args: $1 - "owner/name"
 #
-# Re-parses repos.json on every call. Inside a clone loop, load the enrolled set
-# ONCE with repoman_load_enrolled and check membership with is_enrolled_in to
-# avoid a full jq parse per iteration.
+# Re-parses repos.json on every call, so it is a one-off membership check, not a
+# per-iteration one. To iterate the enrolled clones in a loop, use
+# enrolled_clone_dirs (which drives from the enrolled set and stats each clone).
 is_enrolled() {
   local repo="$1"
   repoman_get_repos | grep -qxF "$repo"
 }
 
-# Load the enrolled set once for in-memory membership checks. Prints the same
-# "owner/name"-per-line set as repoman_get_repos (and fails loud identically);
-# callers capture it into a variable before a loop:
+# Load the enrolled set once for in-memory membership checks. A thin semantic
+# alias for repoman_get_repos: it prints the same "owner/name"-per-line set and
+# fails loud identically, and it re-reads repos.json on every call (there is no
+# internal caching -- capturing the result once is the caller's job). Callers
+# capture it into a variable before a loop:
 #   enrolled=$(repoman_load_enrolled) || exit 1
 repoman_load_enrolled() {
   repoman_get_repos
@@ -166,12 +168,37 @@ repoman_load_enrolled() {
 
 # Return 0 if "owner/name" ($1) is in a preloaded enrolled set ($2, newline-
 # separated as produced by repoman_load_enrolled), else 1. Exact whole-line
-# match (grep -Fx) -- same substring-safe semantics as is_enrolled, but with no
-# file read, so it is cheap to call per loop iteration.
+# match (grep -Fx) -- same substring-safe semantics as is_enrolled, but against
+# a preloaded set string rather than a file read. For a one-off check of a repo
+# discovered outside the enrolled set; the clone loops instead drive from the
+# set directly via enrolled_clone_dirs, so they need no per-repo membership test.
 # Args: $1 - "owner/name"; $2 - the preloaded enrolled set
 is_enrolled_in() {
   local repo="$1" enrolled="$2"
   printf '%s\n' "$enrolled" | grep -qxF "$repo"
+}
+
+# Emit each ENROLLED "owner/name" whose clone exists under $REPOS_DIR, one per
+# line, in enrolled order. This is the scanners'/fixers' loop driver: they
+# iterate the enrolled set and stat each clone, rather than globbing
+# "$REPOS_DIR"/*/ and filtering. Globbing silently dropped a ".github" repo,
+# because bash excludes leading-dot entries from a "*/" glob unless dotglob is
+# set; driving from enrollment makes the enrolled set authoritative and treats
+# a leading-dot name as the ordinary string it is. A repo enrolled but not yet
+# cloned (no "$REPOS_DIR/owner/name/.git") is skipped, not emitted.
+# Args: $1 - the preloaded enrolled set (as from repoman_load_enrolled).
+# Reads: $REPOS_DIR (must be set by repoman_config).
+# Callers capture once and iterate with a here-string, keeping the loop body in
+# the current shell so counters accumulate:
+#   CLONES=$(enrolled_clone_dirs "$ENROLLED")
+#   while IFS= read -r full_repo; do ... done <<< "$CLONES"
+enrolled_clone_dirs() {
+  local enrolled="$1" full
+  printf '%s\n' "$enrolled" | while IFS= read -r full; do
+    [ -n "$full" ] || continue
+    [ -d "$REPOS_DIR/$full/.git" ] || continue
+    printf '%s\n' "$full"
+  done
 }
 
 # =============================================================================

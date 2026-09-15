@@ -11,6 +11,7 @@ atomic_write_file
 close_issue_if_valid
 create_fork_pr
 diff_against_previous
+enrolled_clone_dirs
 ensure_fork
 generate_scan_id
 gh_issue_exists
@@ -37,7 +38,7 @@ GOT=$(
 )
 
 if [ "$GOT" = "$WANT" ]; then
-  echo "PASS: lib function inventory (23 functions, none lost/renamed)"
+  echo "PASS: lib function inventory (24 functions, none lost/renamed)"
   exit 0
 else
   echo "FAIL: lib function inventory mismatch"

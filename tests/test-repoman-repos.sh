@@ -82,4 +82,38 @@ if is_enrolled_in "rossoctl/cortex" ""; then
   echo "FAIL is_enrolled_in: empty set must match nothing"; fail=1
 fi
 
-[ "$fail" -eq 0 ] && echo "PASS: repoman_get_repos + is_enrolled + load_enrolled/is_enrolled_in (order, fail-loud, exact match)" || exit 1
+# --- enrolled_clone_dirs: enrollment-driven, owner-namespaced, .github-safe ---
+# The scanners/fixers no longer glob "$REPOS_DIR"/*/ and filter (that silently
+# dropped ".github", which bash excludes from a "*/" glob without dotglob).
+# enrolled_clone_dirs drives the loop from the enrolled set instead: for each
+# "owner/name" in the set, it emits that line iff "$REPOS_DIR/owner/name/.git"
+# exists. Enrollment is authoritative; a leading-dot repo name is just a string.
+CLONE_ROOT=$(mktemp -d)
+# Enrolled AND cloned -- including a ".github" repo, the regression this guards.
+mkdir -p "$CLONE_ROOT/rossoctl/automation/.git"
+mkdir -p "$CLONE_ROOT/rossoctl/.github/.git"
+mkdir -p "$CLONE_ROOT/alice/cortex/.git"
+# Enrolled but NOT cloned (no .git): must be skipped, not emitted.
+mkdir -p "$CLONE_ROOT/rossoctl/cortex"
+# Cloned but NOT enrolled: must be skipped.
+mkdir -p "$CLONE_ROOT/bob/tool/.git"
+
+CLONE_ENROLLED=$'rossoctl/automation\nrossoctl/.github\nrossoctl/cortex\nalice/cortex'
+
+clones=$(REPOS_DIR="$CLONE_ROOT" enrolled_clone_dirs "$CLONE_ENROLLED")
+clone_want=$'rossoctl/automation\nrossoctl/.github\nalice/cortex'
+[ "$clones" = "$clone_want" ] \
+  || { echo "FAIL enrolled_clone_dirs: got [$clones] want [$clone_want]"; fail=1; }
+
+# Explicit .github guard: it must appear (the whole point of the blocking fix).
+printf '%s\n' "$clones" | grep -qxF "rossoctl/.github" \
+  || { echo "FAIL enrolled_clone_dirs: rossoctl/.github must be emitted"; fail=1; }
+
+# A non-enrolled clone must never leak in.
+if printf '%s\n' "$clones" | grep -qxF "bob/tool"; then
+  echo "FAIL enrolled_clone_dirs: non-enrolled bob/tool must be skipped"; fail=1
+fi
+
+rm -rf "$CLONE_ROOT"
+
+[ "$fail" -eq 0 ] && echo "PASS: repoman_get_repos + is_enrolled + load_enrolled/is_enrolled_in + enrolled_clone_dirs (order, fail-loud, exact match, .github-safe)" || exit 1
