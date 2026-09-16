@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pure writer/validator for the three ~/.repoman file kinds (RepoMan Phase 2).
+# Pure writer/validator for the three ~/.repoman file kinds RepoMan reads.
 #
 # Subcommands: init-config, add-repo, enable-program, set-output. Each writes
 # exactly one thing, validates it, and persists atomically (temp file in the
@@ -8,7 +8,7 @@
 #
 # This script never calls gh, never prompts, never clones, never forks. It
 # receives already-resolved inputs (from the repoman-setup skill) and writes
-# JSON. All paths honor the same $REPOMAN_* overrides Phase 1's reader uses:
+# JSON. All paths honor the same $REPOMAN_* overrides the reader uses:
 #   REPOMAN_CONFIG_FILE   (default ~/.repoman/config.json)
 #   REPOMAN_REPOS_FILE    (default ~/.repoman/repos.json)
 #   REPOMAN_PROGRAMS_DIR  (default ~/.repoman/programs/)
@@ -26,6 +26,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # standing orders in this repo: scripts/link-health-scanner.sh,
 # scripts/dep-bump-scanner.sh, scripts/pr-review-scanner.sh,
 # scripts/automation-health-dashboard.sh, standing-orders/repo-sync.md.
+#
+# This hardcoded list is the current source of truth for the allowlist. A
+# user who introduces a new program must add its identifier here until the
+# program registry (_index.json, tracked in #76) replaces it with a
+# discovered list.
 KNOWN_PROGRAMS="link-health dep-bump pr-review automation-health repo-sync"
 
 usage() {
@@ -54,7 +59,7 @@ Subcommands:
 
 Each subcommand also accepts --help.
 
-Path overrides (same as Phase 1's reader):
+Path overrides (same as the reader):
   REPOMAN_CONFIG_FILE, REPOMAN_REPOS_FILE, REPOMAN_PROGRAMS_DIR
 EOF
 }
@@ -90,7 +95,7 @@ Usage: repoman-setup.sh init-config --repos-dir <path> --fork-owner <owner>
 Write ~/.repoman/config.json ({repos_dir, fork_owner}), overridable via
 REPOMAN_CONFIG_FILE. Both flags are required and non-empty. A leading ~ in
 --repos-dir is expanded to $HOME the same way the reader (repoman_config)
-expands it. repos_dir is validated with validate_repos_dir (Phase 1).
+expands it. repos_dir is validated with validate_repos_dir (from the reader).
 Idempotent: re-running overwrites the file.
 EOF
     return 0
@@ -205,8 +210,8 @@ EOF
   # Reject an empty resolved set BEFORE any write. A lone --owner with no
   # --name (zero pairs built) or an empty JSON array on stdin would otherwise
   # merge in nothing and write out an empty repos.json (or leave an absent
-  # file absent) with exit 0 -- the Phase 1 reader then fails loud at READ
-  # time with "empty repos array" instead of setup catching it immediately.
+  # file absent) with exit 0 -- the reader then fails loud at READ time with
+  # "empty repos array" instead of setup catching it immediately.
   if [ "$(printf '%s' "$new_entries" | jq 'length')" -eq 0 ]; then
     echo "ERROR: add-repo: no repos to add (empty resolved set)." >&2
     return 1
