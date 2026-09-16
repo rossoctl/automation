@@ -77,9 +77,9 @@ No new flags for paths — consistent with Phase 1's variable semantics.
 | Subcommand | Inputs | Writes | Validation |
 |---|---|---|---|
 | `init-config` | `--repos-dir <path> --fork-owner <owner>` | `config.json` | Both required and non-empty. Leading `~` expanded to `$HOME` the same way `repoman_config` reads it. `repos_dir` run through `validate_repos_dir` (Phase 1). Idempotent overwrite. |
-| `add-repo` | `--owner <o> --name <n>` (repeatable) **or** a JSON array on stdin | merges into `repos.json` | Rejects empty/missing owner or name (same guard as `repoman_get_repos`, which rejects `""`). Dedups on `owner/name`. Creates the array if the file is absent. |
+| `add-repo` | `--owner <o> --name <n>` (repeatable) **or** a JSON array on stdin | merges into `repos.json` | Rejects empty/missing owner or name (same guard as `repoman_get_repos`, which rejects `""`). Rejects a resolved set of zero entries (e.g. a lone `--owner` with no `--name`, or `[]` on stdin) before any write, so `add-repo` never writes an empty `repos.json` that the Phase 1 reader would later reject at read time. Dedups on `owner/name`. Creates the array if the file is absent. |
 | `enable-program` | `--program <name>` | `programs/<name>.json`, `{ "enabled": true }` (JSON-merge) | `<name>` checked against a known-program allowlist so a typo cannot create `programs/lnik-health.json`. Creates `programs/` dir. |
-| `set-output` | `--program <name> --mode same\|central [--repo <owner/name>]` | merges `output_repo` into `programs/<name>.json` | `--repo` required iff `mode=central`, validated as `owner/name`. `--mode` must be `same` or `central`. |
+| `set-output` | `--program <name> --mode same\|central [--repo <owner/name>]` | merges `output_repo` into `programs/<name>.json` | `--repo` required iff `mode=central`, validated as exactly `owner/name` (one slash, both parts non-empty; e.g. `a/b/c` is rejected). `--mode` must be `same` or `central`. |
 
 Every subcommand supports `--help` (the SKILL.md instructs the agent to run
 it first, matching the scanner-skill convention).
@@ -225,14 +225,18 @@ path is testable with fixtures and `$REPOMAN_*` overrides against a temp dir:
   `--fork-owner`; expands leading `~`; rejects a dangerous `repos_dir` via
   `validate_repos_dir`; round-trips through `repoman_config`.
 - `add-repo`: single repo; repeated `--owner/--name`; JSON-array-on-stdin;
-  dedup of a repeat; rejects empty owner and empty name; round-trips through
-  `repoman_get_repos`; the same-name-different-owner pair
-  (`rossoctl/cortex` + `alice/cortex`) both persist distinctly.
+  dedup of a repeat, including a single call that dedups against an
+  already-existing file; rejects empty owner and empty name; rejects a
+  resolved set of zero entries (lone `--owner` with no `--name`, or `[]` on
+  stdin) before any write; round-trips through `repoman_get_repos`; the
+  same-name-different-owner pair (`rossoctl/cortex` + `alice/cortex`) both
+  persist distinctly.
 - `enable-program`: creates the file with `enabled:true`; rejects an
   unknown program name (allowlist); creates `programs/` dir.
 - `set-output`: `same` mode; `central` mode with `--repo`; rejects `central`
-  without `--repo`; rejects an invalid mode; **merges** into an existing
-  `enabled:true` file without dropping `enabled`.
+  without `--repo`; rejects an invalid mode; rejects a `--repo` that is not
+  exactly `owner/name` (no slash, or more than one slash, e.g. `a/b/c`);
+  **merges** into an existing `enabled:true` file without dropping `enabled`.
 
 ## Deliverables
 
