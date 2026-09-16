@@ -176,8 +176,10 @@ Usage: repoman-setup.sh add-repo (--owner <o> --name <n>)...
 
 Merge one or more {owner,name} entries into repos.json, overridable via
 REPOMAN_REPOS_FILE. --owner/--name may repeat to add several repos in one
-call, in order. Alternatively, pipe a JSON array of {owner,name} objects on
-stdin (used with no --owner/--name flags). Rejects any entry with an empty
+call, in order; the flags must alternate. A second --owner before its --name,
+a --name with no preceding --owner, or a trailing --owner with no following
+--name is rejected. Alternatively, pipe a JSON array of {owner,name} objects
+on stdin (used with no --owner/--name flags). Rejects any entry with an empty
 or missing owner or name. Dedups on owner/name (first occurrence wins);
 creates the array if the file is absent.
 EOF
