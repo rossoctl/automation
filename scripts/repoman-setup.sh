@@ -234,11 +234,18 @@ EOF
           ;;
       esac
     done
+    # A pending owner here means a trailing --owner never met its --name.
+    # Report it specifically, mirroring the loud double-owner/lone-name errors
+    # above, rather than letting it fall through to the generic empty-set check.
+    if [ -n "$owner" ]; then
+      echo "ERROR: add-repo: --owner given without a following --name." >&2
+      return 1
+    fi
     new_entries="$pairs"
   fi
 
-  # Reject an empty resolved set BEFORE any write. A lone --owner with no
-  # --name (zero pairs built) or an empty JSON array on stdin would otherwise
+  # Reject an empty resolved set BEFORE any write. An empty JSON array on
+  # stdin (mis-ordered flags are already caught loudly above) would otherwise
   # merge in nothing and write out an empty repos.json (or leave an absent
   # file absent) with exit 0 -- the reader then fails loud at READ time with
   # "empty repos array" instead of setup catching it immediately.

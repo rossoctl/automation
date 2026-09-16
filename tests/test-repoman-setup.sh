@@ -179,12 +179,16 @@ fi
 diff -q "$REPOS_FILE" "$TEST_TMPDIR/repos-before.json" >/dev/null \
   || { echo "FAIL add-repo empty name must leave file unchanged"; fail=1; }
 
-# --- rejects an empty resolved set: lone --owner with no --name, file unchanged ---
-if REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --owner a >/dev/null 2>&1; then
-  echo "FAIL add-repo should reject a lone --owner with no --name (empty resolved set)"; fail=1
-fi
+# --- rejects a trailing --owner with no following --name, file unchanged, ---
+# --- with a message specific to the unconsumed owner (not the empty-set one) ---
+err=$(REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --owner a 2>&1) \
+  && { echo "FAIL add-repo should reject a trailing --owner with no --name"; fail=1; }
+case "$err" in
+  *"--owner given without a following --name"*) ;;
+  *) echo "FAIL add-repo trailing --owner should report the specific error, got: [$err]"; fail=1 ;;
+esac
 diff -q "$REPOS_FILE" "$TEST_TMPDIR/repos-before.json" >/dev/null \
-  || { echo "FAIL add-repo lone --owner must leave file unchanged"; fail=1; }
+  || { echo "FAIL add-repo trailing --owner must leave file unchanged"; fail=1; }
 
 # --- rejects an empty resolved set: '[]' on stdin, file unchanged (or absent) ---
 if echo '[]' | REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo >/dev/null 2>&1; then

@@ -78,7 +78,7 @@ No new flags for paths — consistent with Phase 1's variable semantics.
 | Subcommand | Inputs | Writes | Validation |
 |---|---|---|---|
 | `init-config` | `--repos-dir <path> --fork-owner <owner>` | `config.json` | Both required and non-empty. Leading `~` expanded to `$HOME` the same way `repoman_config` reads it. `repos_dir` run through `validate_repos_dir` (Phase 1). Idempotent overwrite. |
-| `add-repo` | `--owner <o> --name <n>` (repeatable) **or** a JSON array on stdin | merges into `repos.json` | Rejects empty/missing owner or name (same guard as `repoman_get_repos`, which rejects `""`). `--owner`/`--name` must alternate: a second `--owner` before its `--name`, or a `--name` with no preceding `--owner`, is rejected loudly rather than silently mis-paired (e.g. `--owner alice --owner bob --name repo` must not quietly become `bob/repo`). Rejects a resolved set of zero entries (e.g. a lone `--owner` with no `--name`, or `[]` on stdin) before any write, so `add-repo` never writes an empty `repos.json` that the Phase 1 reader would later reject at read time. Dedups on `owner/name`. Creates the array if the file is absent. |
+| `add-repo` | `--owner <o> --name <n>` (repeatable) **or** a JSON array on stdin | merges into `repos.json` | Rejects empty/missing owner or name (same guard as `repoman_get_repos`, which rejects `""`). `--owner`/`--name` must alternate: a second `--owner` before its `--name`, a `--name` with no preceding `--owner`, or a trailing `--owner` with no following `--name` is rejected loudly with a message specific to that mis-ordering, rather than silently mis-pairing (e.g. `--owner alice --owner bob --name repo` must not quietly become `bob/repo`) or falling through to the generic empty-set error. Rejects a resolved set of zero entries (`[]` on stdin) before any write, so `add-repo` never writes an empty `repos.json` that the Phase 1 reader would later reject at read time. Dedups on `owner/name`. Creates the array if the file is absent. |
 | `enable-program` | `--program <name>` | `programs/<name>.json`, `{ "enabled": true }` (JSON-merge) | `<name>` checked against a known-program allowlist so a typo cannot create `programs/lnik-health.json`. Creates `programs/` dir. |
 | `set-output` | `--program <name> --mode same\|central [--repo <owner/name>]` | merges `output_repo` into `programs/<name>.json` | `--repo` required iff `mode=central`, validated as exactly `owner/name` (one slash, both parts non-empty; e.g. `a/b/c` is rejected). `--mode` must be `same` or `central`. |
 
@@ -228,10 +228,11 @@ path is testable with fixtures and `$REPOMAN_*` overrides against a temp dir:
 - `add-repo`: single repo; repeated `--owner/--name`; JSON-array-on-stdin;
   dedup of a repeat, including a single call that dedups against an
   already-existing file; rejects empty owner and empty name; rejects
-  mis-ordered flags (a second `--owner` before its `--name`, and a `--name`
-  with no preceding `--owner`), each leaving the file unchanged; rejects a
-  resolved set of zero entries (lone `--owner` with no `--name`, or `[]` on
-  stdin) before any write; round-trips through `repoman_get_repos`; the
+  mis-ordered flags (a second `--owner` before its `--name`, a `--name`
+  with no preceding `--owner`, and a trailing `--owner` with no following
+  `--name` — the last with its own specific message, asserted), each leaving
+  the file unchanged; rejects a resolved set of zero entries (`[]` on stdin)
+  before any write; round-trips through `repoman_get_repos`; the
   same-name-different-owner pair (`rossoctl/cortex` + `alice/cortex`) both
   persist distinctly; a successful write leaves no `.repoman-setup.*` temp
   file behind (atomic-write cleanup guard).
