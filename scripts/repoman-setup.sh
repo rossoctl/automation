@@ -79,8 +79,22 @@ atomic_write() {
   dir="$(dirname "$target")"
   mkdir -p "$dir"
   tmp="$(mktemp "$dir/.repoman-setup.XXXXXX")"
-  printf '%s\n' "$content" > "$tmp"
-  mv "$tmp" "$target"
+  # Clean up the temp file if the write or the rename fails (e.g. disk full).
+  # Under set -e a bare failing printf/mv would abort the script and orphan the
+  # .repoman-setup.XXXXXX temp file in the target dir, so guard each step and
+  # remove the temp before propagating the failure. On success the mv consumes
+  # the temp file. (An inline guard, not a RETURN trap: a function-scoped
+  # RETURN trap leaks to later functions' returns under set -u.)
+  if ! printf '%s\n' "$content" > "$tmp"; then
+    rm -f "$tmp"
+    echo "ERROR: atomic_write: failed to write temp file for $target." >&2
+    return 1
+  fi
+  if ! mv "$tmp" "$target"; then
+    rm -f "$tmp"
+    echo "ERROR: atomic_write: failed to move temp file into $target." >&2
+    return 1
+  fi
 }
 
 # =============================================================================
@@ -187,10 +201,26 @@ EOF
     while [ $# -gt 0 ]; do
       case "$1" in
         --owner)
+          # A --name consumes the pending --owner and clears it. If owner is
+          # still set here, a second --owner arrived before its --name (e.g.
+          # "--owner alice --owner bob --name repo") -- that would silently
+          # pair bob/repo and drop alice, so fail loudly on the mis-ordering
+          # instead of guessing.
+          if [ -n "$owner" ]; then
+            echo "ERROR: add-repo: --owner given twice before a --name (mis-ordered flags?)." >&2
+            return 1
+          fi
           owner="${2:-}"
           shift 2
           ;;
         --name)
+          # --name must follow its --owner; a --name with no pending owner is
+          # a mis-ordered or lone flag, not an empty-owner entry to validate
+          # downstream.
+          if [ -z "$owner" ]; then
+            echo "ERROR: add-repo: --name given without a preceding --owner." >&2
+            return 1
+          fi
           name="${2:-}"
           shift 2
           pairs=$(jq -n -c --argjson arr "$pairs" --arg owner "$owner" --arg name "$name" \

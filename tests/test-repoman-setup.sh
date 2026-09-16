@@ -119,6 +119,13 @@ got=$(REPOMAN_REPOS_FILE="$REPOS_FILE" repoman_get_repos)
 [ "$got" = "rossoctl/automation" ] \
   || { echo "FAIL add-repo single round-trip: got [$got]"; fail=1; }
 
+# --- atomic_write leaves no .repoman-setup.* temp file behind on success ---
+# The write goes to a temp file in the target dir, then mv consumes it; the
+# RETURN-trap cleanup must not fire early or leave litter on the happy path.
+leftover=$(find "$(dirname "$REPOS_FILE")" -name '.repoman-setup.*' 2>/dev/null)
+[ -z "$leftover" ] \
+  || { echo "FAIL atomic_write left a temp file behind: [$leftover]"; fail=1; }
+
 # --- repeated flags, in order ---
 rm -f "$REPOS_FILE"
 REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo \
@@ -200,6 +207,23 @@ if REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --owner a --name >/de
 fi
 diff -q "$REPOS_FILE" "$TEST_TMPDIR/repos-before.json" >/dev/null \
   || { echo "FAIL add-repo trailing --name with no value must leave file unchanged"; fail=1; }
+
+# --- a second --owner before its --name is rejected loudly, file unchanged ---
+# `--owner alice --owner bob --name repo` would otherwise silently pair bob/repo
+# and drop alice; a mis-ordered flag set must fail, not guess.
+if REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo \
+     --owner alice --owner bob --name repo >/dev/null 2>&1; then
+  echo "FAIL add-repo should reject a second --owner before its --name"; fail=1
+fi
+diff -q "$REPOS_FILE" "$TEST_TMPDIR/repos-before.json" >/dev/null \
+  || { echo "FAIL add-repo double --owner must leave file unchanged"; fail=1; }
+
+# --- a --name with no preceding --owner is rejected, file unchanged ---
+if REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --name repo >/dev/null 2>&1; then
+  echo "FAIL add-repo should reject a --name with no preceding --owner"; fail=1
+fi
+diff -q "$REPOS_FILE" "$TEST_TMPDIR/repos-before.json" >/dev/null \
+  || { echo "FAIL add-repo lone --name must leave file unchanged"; fail=1; }
 
 # --- single-call dedup spans existing+new: pre-seed then add the same repo again ---
 rm -f "$REPOS_FILE"
