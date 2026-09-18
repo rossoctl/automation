@@ -16,23 +16,31 @@ _ORG_SH_LOADED=1
 # PATH VALIDATION
 # =============================================================================
 
-# Validate that REPOS_DIR is set and not pointing to a dangerous path.
+# Validate that a repos directory is set and not pointing to a dangerous path.
 # Rejects root filesystem paths, system directories, and $HOME itself
 # (without a subdirectory). Intended to prevent accidental scanning or
 # modification of system files.
 #
-# Usage: validate_repos_dir "$REPOS_DIR"
+# Usage: validate_repos_dir "$REPOS_DIR" [label]
 # Args:
 #   $1 - the repos directory path to validate
-# Returns: 0 if valid, exits with error message if invalid
+#   $2 - optional label for how the caller names this path in its own errors
+#        (default "REPOS_DIR", the env var the scanner/fixer flow exports).
+#        repoman-setup.sh passes "--repos-dir" so messages match the flag the
+#        user actually typed, rather than an env var that interface never asks
+#        for.
+# Returns: 0 if valid, returns 1 with an error message if invalid. (Returns,
+# not exits: the caller unwinds its own error path -- both the top-level
+# scanner/fixer callers under set -e and repoman-setup.sh's cmd_init_config
+# treat a non-zero return as the failure it is.)
 validate_repos_dir() {
   local path="$1"
+  local label="${2:-REPOS_DIR}"
 
   if [ -z "$path" ]; then
-    echo "ERROR: REPOS_DIR is not set." >&2
-    echo "Export it to the directory containing your org's cloned repos:" >&2
-    echo "  export REPOS_DIR=~/my-org" >&2
-    exit 1
+    echo "ERROR: $label is not set." >&2
+    echo "Point it at the directory containing your org's cloned repos." >&2
+    return 1
   fi
 
   # Resolve to absolute path for comparison
@@ -43,23 +51,23 @@ validate_repos_dir() {
   local dangerous_paths=("/" "/etc" "/usr" "/var" "/sys" "/proc" "/bin" "/sbin" "/lib" "/tmp")
   for dangerous in "${dangerous_paths[@]}"; do
     if [ "$resolved" = "$dangerous" ]; then
-      echo "ERROR: REPOS_DIR cannot be '$resolved' -- this is a system directory." >&2
-      exit 1
+      echo "ERROR: $label cannot be '$resolved' -- this is a system directory." >&2
+      return 1
     fi
   done
 
   # Reject $HOME itself (must be a subdirectory)
   if [ "$resolved" = "$HOME" ]; then
-    echo "ERROR: REPOS_DIR cannot be your home directory itself." >&2
-    echo "Use a subdirectory, e.g.: export REPOS_DIR=~/my-org" >&2
-    exit 1
+    echo "ERROR: $label cannot be your home directory itself." >&2
+    echo "Use a subdirectory instead." >&2
+    return 1
   fi
 
   # Check the directory exists
   if [ ! -d "$path" ]; then
-    echo "ERROR: REPOS_DIR '$path' does not exist." >&2
-    echo "Create it and clone your org's repos there, or set REPOS_DIR to an existing directory." >&2
-    exit 1
+    echo "ERROR: $label '$path' does not exist." >&2
+    echo "Create it (and clone your org's repos there) or point $label at an existing directory." >&2
+    return 1
   fi
 
   return 0

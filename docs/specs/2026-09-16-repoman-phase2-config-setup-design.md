@@ -63,6 +63,15 @@ resolved answer.
 The script never calls `gh`, never prompts, never clones, never forks. It
 receives already-resolved inputs and writes JSON.
 
+Every flag that takes a value guards its arity before `shift 2`: a trailing
+flag with no value (e.g. `add-repo --owner alice --name`) would otherwise make
+`shift 2` fail and, under `set -e`, abort the script with exit 1 and no output
+at all — the one silent failure in a script that is otherwise loud on every
+mis-ordering. The guard (`[ $# -ge 2 ]`) emits a specific `<flag> requires a
+value` message and returns 1 instead. This matters especially because the
+skill/harness drives the script non-interactively: a silent abort would let
+the caller assume success.
+
 ### Path overrides
 
 All subcommands honor the same environment overrides Phase 1's reader uses,
@@ -77,7 +86,7 @@ No new flags for paths — consistent with Phase 1's variable semantics.
 
 | Subcommand | Inputs | Writes | Validation |
 |---|---|---|---|
-| `init-config` | `--repos-dir <path> --fork-owner <owner>` | `config.json` | Both required and non-empty. Leading `~` expanded to `$HOME` the same way `repoman_config` reads it. `repos_dir` run through `validate_repos_dir` (Phase 1). Idempotent overwrite. |
+| `init-config` | `--repos-dir <path> --fork-owner <owner>` | `config.json` | Both required and non-empty. Leading `~` expanded to `$HOME` the same way `repoman_config` reads it. `repos_dir` run through `validate_repos_dir` (Phase 1), which is passed the `--repos-dir` label so its errors name the flag the user typed rather than the `REPOS_DIR` env var of the scanner/fixer flow. Idempotent overwrite. |
 | `add-repo` | `--owner <o> --name <n>` (repeatable) **or** a JSON array on stdin | merges into `repos.json` | Rejects empty/missing owner or name (same guard as `repoman_get_repos`, which rejects `""`). `--owner`/`--name` must alternate: a second `--owner` before its `--name`, a `--name` with no preceding `--owner`, or a trailing `--owner` with no following `--name` is rejected loudly with a message specific to that mis-ordering, rather than silently mis-pairing (e.g. `--owner alice --owner bob --name repo` must not quietly become `bob/repo`) or falling through to the generic empty-set error. Rejects a resolved set of zero entries (`[]` on stdin) before any write, so `add-repo` never writes an empty `repos.json` that the Phase 1 reader would later reject at read time. Dedups on `owner/name`. Creates the array if the file is absent. |
 | `enable-program` | `--program <name>` | `programs/<name>.json`, `{ "enabled": true }` (JSON-merge) | `<name>` checked against a known-program allowlist so a typo cannot create `programs/lnik-health.json`. Creates `programs/` dir. |
 | `set-output` | `--program <name> --mode same\|central [--repo <owner/name>]` | merges `output_repo` into `programs/<name>.json` | `--repo` required iff `mode=central`, validated as exactly `owner/name` (one slash, both parts non-empty; e.g. `a/b/c` is rejected). `--mode` must be `same` or `central`. |
@@ -88,6 +97,26 @@ it first, matching the scanner-skill convention).
 `enable-program` and `set-output` perform a JSON **merge**, not an overwrite,
 so Phase 3 can add `pat_scopes`/`labels` to the same file without clobbering
 the setup-collected fields.
+
+### Shared `validate_repos_dir` (Phase 1 `org.sh`) touch-up
+
+`init-config` reuses Phase 1's `validate_repos_dir`, which was written for the
+older env-var flow: it hard-coded `REPOS_DIR` in every error and called
+`exit 1`. Two small, caller-safe changes were made at the source rather than
+worked around here (a reviewer's point that the fix belongs in the broader
+system, not the script under change):
+
+- An optional second **label** argument (default `REPOS_DIR`) controls how the
+  path is named in error messages. The two legacy callers
+  (`dep-bump-scanner.sh`, `dep-bump-fixer.sh`) pass nothing and keep byte-for-
+  byte identical messages; `init-config` passes `--repos-dir` so its errors
+  name the flag the user actually typed. The "clone your org's repos there"
+  advice was also made caller-neutral.
+- `exit 1` → `return 1`, so the function unwinds through its caller instead of
+  killing the process. Behaviour-equivalent for the two legacy callers (they
+  invoke it at top level under `set -e`, where a non-zero return aborts the
+  same way) and strictly better for `cmd_init_config`, which now returns
+  through its own path.
 
 ## JSON schemas
 
@@ -222,26 +251,39 @@ Bash tests under `tests/`, added to the explicit CI list in
 `.github/workflows/tests.yml`. Because the script is a pure writer, every
 path is testable with fixtures and `$REPOMAN_*` overrides against a temp dir:
 
+Missing-value paths are asserted on the **message**, not just the exit code:
+a test that voids stderr and checks only non-zero exit would let the silent
+`shift 2` abort satisfy "fails cleanly", so every trailing-flag-with-no-value
+test captures stderr and greps for the specific `<flag> requires a value`
+message.
+
 - `init-config`: writes both keys; rejects empty `--repos-dir` / empty
-  `--fork-owner`; expands leading `~`; rejects a dangerous `repos_dir` via
-  `validate_repos_dir`; round-trips through `repoman_config`.
+  `--fork-owner`; rejects a trailing `--repos-dir` / `--fork-owner` with no
+  value (message asserted); expands leading `~`; rejects a dangerous
+  `repos_dir` via `validate_repos_dir`, asserting the error names
+  `--repos-dir` (not `REPOS_DIR`); round-trips through `repoman_config`.
 - `add-repo`: single repo; repeated `--owner/--name`; JSON-array-on-stdin;
   dedup of a repeat, including a single call that dedups against an
   already-existing file; rejects empty owner and empty name; rejects
   mis-ordered flags (a second `--owner` before its `--name`, a `--name`
   with no preceding `--owner`, and a trailing `--owner` with no following
-  `--name` — the last with its own specific message, asserted), each leaving
-  the file unchanged; rejects a resolved set of zero entries (`[]` on stdin)
-  before any write; round-trips through `repoman_get_repos`; the
-  same-name-different-owner pair (`rossoctl/cortex` + `alice/cortex`) both
-  persist distinctly; a successful write leaves no `.repoman-setup.*` temp
-  file behind (atomic-write cleanup guard).
+  `--name` — the last with its own specific message, asserted); rejects a
+  trailing `--owner` / `--name` with no value (message asserted, distinct
+  from the mis-ordering cases), each leaving the file unchanged; rejects a
+  resolved set of zero entries (`[]` on stdin) before any write; round-trips
+  through `repoman_get_repos`; the same-name-different-owner pair
+  (`rossoctl/cortex` + `alice/cortex`) both persist distinctly; a successful
+  write leaves no `.repoman-setup.*` temp file behind (atomic-write cleanup
+  guard).
 - `enable-program`: creates the file with `enabled:true`; rejects an
-  unknown program name (allowlist); creates `programs/` dir.
+  unknown program name (allowlist); rejects a trailing `--program` with no
+  value (message asserted); creates `programs/` dir.
 - `set-output`: `same` mode; `central` mode with `--repo`; rejects `central`
   without `--repo`; rejects an invalid mode; rejects a `--repo` that is not
   exactly `owner/name` (no slash, or more than one slash, e.g. `a/b/c`);
-  **merges** into an existing `enabled:true` file without dropping `enabled`.
+  rejects a trailing `--program` / `--mode` / `--repo` with no value (message
+  asserted); **merges** into an existing `enabled:true` file without dropping
+  `enabled`.
 
 ## Deliverables
 
