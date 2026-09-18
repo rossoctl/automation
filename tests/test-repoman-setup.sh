@@ -69,12 +69,36 @@ if REPOMAN_CONFIG_FILE="$CFG" bash "$SETUP" init-config \
 fi
 [ -f "$CFG" ] && { echo "FAIL init-config empty repos-dir must write nothing"; fail=1; }
 
-# --- rejects a dangerous repos_dir via validate_repos_dir, writes nothing ---
+# --- missing value for a trailing flag fails LOUDLY (shift-2 regression guard) ---
 rm -f "$CFG"
-if REPOMAN_CONFIG_FILE="$CFG" bash "$SETUP" init-config \
-     --repos-dir "/etc" --fork-owner alice >/dev/null 2>&1; then
-  echo "FAIL init-config should reject dangerous repos-dir (/etc)"; fail=1
-fi
+err=$(REPOMAN_CONFIG_FILE="$CFG" bash "$SETUP" init-config --repos-dir 2>&1) \
+  && { echo "FAIL init-config should reject a trailing --repos-dir with no value"; fail=1; }
+case "$err" in
+  *"--repos-dir requires a value"*) ;;
+  *) echo "FAIL init-config trailing --repos-dir should explain itself, got: [$err]"; fail=1 ;;
+esac
+[ -f "$CFG" ] && { echo "FAIL init-config missing repos-dir value must write nothing"; fail=1; }
+
+rm -f "$CFG"
+err=$(REPOMAN_CONFIG_FILE="$CFG" bash "$SETUP" init-config \
+       --repos-dir "$REPOS_DIR_FIXTURE" --fork-owner 2>&1) \
+  && { echo "FAIL init-config should reject a trailing --fork-owner with no value"; fail=1; }
+case "$err" in
+  *"--fork-owner requires a value"*) ;;
+  *) echo "FAIL init-config trailing --fork-owner should explain itself, got: [$err]"; fail=1 ;;
+esac
+[ -f "$CFG" ] && { echo "FAIL init-config missing fork-owner value must write nothing"; fail=1; }
+
+# --- rejects a dangerous repos_dir via validate_repos_dir, writes nothing; ---
+# --- the error names --repos-dir (the flag the user typed), not REPOS_DIR ---
+rm -f "$CFG"
+err=$(REPOMAN_CONFIG_FILE="$CFG" bash "$SETUP" init-config \
+       --repos-dir "/etc" --fork-owner alice 2>&1) \
+  && { echo "FAIL init-config should reject dangerous repos-dir (/etc)"; fail=1; }
+case "$err" in
+  *"--repos-dir cannot be"*) ;;
+  *) echo "FAIL init-config dangerous repos-dir should name --repos-dir, got: [$err]"; fail=1 ;;
+esac
 [ -f "$CFG" ] && { echo "FAIL init-config dangerous repos-dir must write nothing"; fail=1; }
 
 # --- leading ~ expands the same way the reader expands it ---
@@ -205,12 +229,28 @@ fi
 [ -f "$TEST_TMPDIR/absent-repos.json" ] \
   && { echo "FAIL add-repo empty stdin array must not create the repos file"; fail=1; }
 
-# --- trailing flag with a missing value fails cleanly, file unchanged ---
-if REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --owner a --name >/dev/null 2>&1; then
-  echo "FAIL add-repo should reject a trailing --name with no value"; fail=1
-fi
+# --- trailing --name with no value fails LOUDLY, file unchanged ---
+# Regression guard: `shift 2` on a last-arg flag used to abort under set -e
+# with no output at all, so a silent exit-1 satisfied "fails cleanly". Assert
+# the message, not just the exit code, or a return to silence goes unnoticed.
+err=$(REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --owner a --name 2>&1) \
+  && { echo "FAIL add-repo should reject a trailing --name with no value"; fail=1; }
+case "$err" in
+  *"--name requires a value"*) ;;
+  *) echo "FAIL add-repo trailing --name should explain itself, got: [$err]"; fail=1 ;;
+esac
 diff -q "$REPOS_FILE" "$TEST_TMPDIR/repos-before.json" >/dev/null \
   || { echo "FAIL add-repo trailing --name with no value must leave file unchanged"; fail=1; }
+
+# --- trailing --owner with no value fails LOUDLY (distinct from the trailing
+# --- --owner-with-no-following-*--name* case, which is a mis-ordering, not a
+# --- missing value): here --owner is literally the last token ---
+err=$(REPOMAN_REPOS_FILE="$REPOS_FILE" bash "$SETUP" add-repo --owner rossoctl --name automation --owner 2>&1) \
+  && { echo "FAIL add-repo should reject a trailing --owner with no value"; fail=1; }
+case "$err" in
+  *"--owner requires a value"*) ;;
+  *) echo "FAIL add-repo trailing --owner (no value) should explain itself, got: [$err]"; fail=1 ;;
+esac
 
 # --- a second --owner before its --name is rejected loudly, file unchanged ---
 # `--owner alice --owner bob --name repo` would otherwise silently pair bob/repo
@@ -271,6 +311,15 @@ enabled=$(jq -r '.enabled' "$PROGRAMS_DIR/link-health.json")
 mode=$(jq -r '.output_repo.mode' "$PROGRAMS_DIR/link-health.json")
 [ "$enabled" = "true" ] && [ "$mode" = "same" ] \
   || { echo "FAIL enable-program merge: enabled=[$enabled] mode=[$mode]"; fail=1; }
+
+# --- missing value for --program fails LOUDLY (shift-2 regression guard) ---
+rm -rf "$PROGRAMS_DIR"
+err=$(REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" enable-program --program 2>&1) \
+  && { echo "FAIL enable-program should reject a trailing --program with no value"; fail=1; }
+case "$err" in
+  *"--program requires a value"*) ;;
+  *) echo "FAIL enable-program trailing --program should explain itself, got: [$err]"; fail=1 ;;
+esac
 
 # =============================================================================
 # Task 5: set-output
@@ -340,6 +389,27 @@ rm -rf "$PROGRAMS_DIR"
 if REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-output --program lnik-health --mode same >/dev/null 2>&1; then
   echo "FAIL set-output should reject unknown program name"; fail=1
 fi
+
+# --- missing value for a trailing flag fails LOUDLY (shift-2 regression guard) ---
+rm -rf "$PROGRAMS_DIR"
+err=$(REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-output --program 2>&1) \
+  && { echo "FAIL set-output should reject a trailing --program with no value"; fail=1; }
+case "$err" in
+  *"--program requires a value"*) ;;
+  *) echo "FAIL set-output trailing --program should explain itself, got: [$err]"; fail=1 ;;
+esac
+err=$(REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-output --program link-health --mode 2>&1) \
+  && { echo "FAIL set-output should reject a trailing --mode with no value"; fail=1; }
+case "$err" in
+  *"--mode requires a value"*) ;;
+  *) echo "FAIL set-output trailing --mode should explain itself, got: [$err]"; fail=1 ;;
+esac
+err=$(REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-output --program link-health --mode central --repo 2>&1) \
+  && { echo "FAIL set-output should reject a trailing --repo with no value"; fail=1; }
+case "$err" in
+  *"--repo requires a value"*) ;;
+  *) echo "FAIL set-output trailing --repo should explain itself, got: [$err]"; fail=1 ;;
+esac
 
 [ "$fail" -eq 0 ] \
   && echo "PASS: repoman-setup.sh (init-config, add-repo, enable-program, set-output)" \

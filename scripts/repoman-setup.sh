@@ -119,11 +119,17 @@ EOF
   while [ $# -gt 0 ]; do
     case "$1" in
       --repos-dir)
-        repos_dir="${2:-}"
+        # Guard arity before `shift 2`: a trailing flag with no value leaves
+        # only one positional, so `shift 2` fails and `set -e` aborts the
+        # script SILENTLY (exit 1, no message) before the checks below ever
+        # run. Fail loudly instead, consistent with every other error here.
+        [ $# -ge 2 ] || { echo "ERROR: init-config: --repos-dir requires a value." >&2; return 1; }
+        repos_dir="$2"
         shift 2
         ;;
       --fork-owner)
-        fork_owner="${2:-}"
+        [ $# -ge 2 ] || { echo "ERROR: init-config: --fork-owner requires a value." >&2; return 1; }
+        fork_owner="$2"
         shift 2
         ;;
       *)
@@ -154,7 +160,9 @@ EOF
     "~/"*) expanded="$HOME/${expanded#"~/"}" ;;
   esac
 
-  validate_repos_dir "$expanded"
+  # Pass the flag name so validate_repos_dir's errors name "--repos-dir" (what
+  # the user typed here), not the "REPOS_DIR" env var of the scanner/fixer flow.
+  validate_repos_dir "$expanded" "--repos-dir"
 
   local json
   json=$(jq -n --arg repos_dir "$repos_dir" --arg fork_owner "$fork_owner" \
@@ -203,6 +211,10 @@ EOF
     while [ $# -gt 0 ]; do
       case "$1" in
         --owner)
+          # Guard arity before `shift 2`: a trailing flag with no value would
+          # otherwise make `shift 2` fail and `set -e` abort silently (exit 1,
+          # no message) before any error below runs.
+          [ $# -ge 2 ] || { echo "ERROR: add-repo: --owner requires a value." >&2; return 1; }
           # A --name consumes the pending --owner and clears it. If owner is
           # still set here, a second --owner arrived before its --name (e.g.
           # "--owner alice --owner bob --name repo") -- that would silently
@@ -212,10 +224,11 @@ EOF
             echo "ERROR: add-repo: --owner given twice before a --name (mis-ordered flags?)." >&2
             return 1
           fi
-          owner="${2:-}"
+          owner="$2"
           shift 2
           ;;
         --name)
+          [ $# -ge 2 ] || { echo "ERROR: add-repo: --name requires a value." >&2; return 1; }
           # --name must follow its --owner; a --name with no pending owner is
           # a mis-ordered or lone flag, not an empty-owner entry to validate
           # downstream.
@@ -223,7 +236,7 @@ EOF
             echo "ERROR: add-repo: --name given without a preceding --owner." >&2
             return 1
           fi
-          name="${2:-}"
+          name="$2"
           shift 2
           pairs=$(jq -n -c --argjson arr "$pairs" --arg owner "$owner" --arg name "$name" \
             '$arr + [{owner: $owner, name: $name}]')
@@ -312,7 +325,10 @@ EOF
   while [ $# -gt 0 ]; do
     case "$1" in
       --program)
-        program="${2:-}"
+        # Guard arity before `shift 2` (see init-config): a trailing --program
+        # with no value would abort silently under set -e otherwise.
+        [ $# -ge 2 ] || { echo "ERROR: enable-program: --program requires a value." >&2; return 1; }
+        program="$2"
         shift 2
         ;;
       *)
@@ -367,15 +383,20 @@ EOF
   while [ $# -gt 0 ]; do
     case "$1" in
       --program)
-        program="${2:-}"
+        # Guard arity before `shift 2` (see init-config): a trailing flag with
+        # no value would abort silently under set -e otherwise.
+        [ $# -ge 2 ] || { echo "ERROR: set-output: --program requires a value." >&2; return 1; }
+        program="$2"
         shift 2
         ;;
       --mode)
-        mode="${2:-}"
+        [ $# -ge 2 ] || { echo "ERROR: set-output: --mode requires a value." >&2; return 1; }
+        mode="$2"
         shift 2
         ;;
       --repo)
-        repo="${2:-}"
+        [ $# -ge 2 ] || { echo "ERROR: set-output: --repo requires a value." >&2; return 1; }
+        repo="$2"
         shift 2
         ;;
       *)
