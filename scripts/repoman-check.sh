@@ -150,9 +150,19 @@ cleanup_probe_cache() {
 # caching by the repo's visibility (private/public) so repeated calls for
 # repos of the same visibility do not re-probe.
 probe_accepted_scopes() {
-  local repo="$1" is_private hdr line value cache_file
+  local repo="$1" is_private hdr line value cache_file vis_file vis_key
 
-  is_private=$(gh_with_backoff api "repos/$repo" --jq '.private' 2>/dev/null)
+  # Cache the visibility lookup per repo so `gh api repos/<repo>` fires at most
+  # once per repo (not once per missing label), then key the accepted-scope
+  # probe on the visibility class so it fires at most once per class.
+  vis_key=$(printf '%s' "$repo" | tr '/' '_')
+  vis_file="$CACHE_DIR/vis_$vis_key"
+  if [ -f "$vis_file" ]; then
+    is_private=$(cat "$vis_file")
+  else
+    is_private=$(gh_with_backoff api "repos/$repo" --jq '.private' 2>/dev/null)
+    printf '%s' "$is_private" > "$vis_file"
+  fi
   case "$is_private" in
     true) cache_file="$CACHE_DIR/accepted_private" ;;
     *) cache_file="$CACHE_DIR/accepted_public" ;;
@@ -203,7 +213,9 @@ check_labels() {
   local repo="$1" required="$2" create_flag="$3"
   local existing label accepted
 
-  existing=$(gh_with_backoff label list --repo "$repo")
+  # `gh label list` prints a TSV table (name<TAB>description<TAB>color); ask for
+  # bare names one per line so the whole-line match below is correct.
+  existing=$(gh_with_backoff label list --repo "$repo" --json name --jq '.[].name')
 
   while IFS= read -r label || [ -n "$label" ]; do
     [ -n "$label" ] || continue
