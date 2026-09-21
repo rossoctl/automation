@@ -411,6 +411,68 @@ case "$err" in
   *) echo "FAIL set-output trailing --repo should explain itself, got: [$err]"; fail=1 ;;
 esac
 
+# =============================================================================
+# Task 6 (Phase 3): set-requirements
+# =============================================================================
+
+# --- happy path: writes all three arrays, merges over enabled ---
+rm -rf "$PROGRAMS_DIR"; mkdir -p "$PROGRAMS_DIR"
+echo '{"enabled":true}' > "$PROGRAMS_DIR/pr-review.json"
+REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements \
+  --program pr-review --pat-scopes repo \
+  --labels-required ready-for-ai-review --labels-applied "needs-changes,approved" \
+  || { echo "FAIL set-requirements happy path should exit 0"; fail=1; }
+got=$(jq -c '{e:.enabled,ps:.pat_scopes,lr:.labels_required,la:.labels_applied}' "$PROGRAMS_DIR/pr-review.json")
+want=$(jq -c -n '{e:true,ps:["repo"],lr:["ready-for-ai-review"],la:["needs-changes","approved"]}')
+[ "$got" = "$want" ] || { echo "FAIL set-requirements merge: got [$got] want [$want]"; fail=1; }
+
+# --- empty CSV yields [] ---
+rm -rf "$PROGRAMS_DIR"
+REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements \
+  --program link-health --pat-scopes repo --labels-required "" --labels-applied "" \
+  || { echo "FAIL set-requirements empty CSV should exit 0"; fail=1; }
+lr=$(jq -c '.labels_required' "$PROGRAMS_DIR/link-health.json")
+[ "$lr" = '[]' ] || { echo "FAIL set-requirements empty CSV should be []: got [$lr]"; fail=1; }
+
+# --- only --program: all arrays default to [] ---
+rm -rf "$PROGRAMS_DIR"
+REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements --program dep-bump \
+  || { echo "FAIL set-requirements program-only should exit 0"; fail=1; }
+got=$(jq -cS '{ps:.pat_scopes,lr:.labels_required,la:.labels_applied}' "$PROGRAMS_DIR/dep-bump.json")
+[ "$got" = '{"la":[],"lr":[],"ps":[]}' ] || { echo "FAIL set-requirements defaults: got [$got]"; fail=1; }
+
+# --- unknown program rejected, nothing written ---
+rm -rf "$PROGRAMS_DIR"
+if REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements --program lnik-health --pat-scopes repo >/dev/null 2>&1; then
+  echo "FAIL set-requirements should reject unknown program"; fail=1
+fi
+[ -f "$PROGRAMS_DIR/lnik-health.json" ] && { echo "FAIL set-requirements unknown program must write nothing"; fail=1; }
+
+# --- missing --program rejected ---
+rm -rf "$PROGRAMS_DIR"
+if REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements --pat-scopes repo >/dev/null 2>&1; then
+  echo "FAIL set-requirements should require --program"; fail=1
+fi
+
+# --- trailing flag with no value fails LOUDLY (shift-2 regression guard) ---
+rm -rf "$PROGRAMS_DIR"
+err=$(REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements --program pr-review --pat-scopes 2>&1) \
+  && { echo "FAIL set-requirements should reject a trailing --pat-scopes with no value"; fail=1; }
+case "$err" in
+  *"--pat-scopes requires a value"*) ;;
+  *) echo "FAIL set-requirements trailing --pat-scopes should explain itself, got: [$err]"; fail=1 ;;
+esac
+[ -f "$PROGRAMS_DIR/pr-review.json" ] && { echo "FAIL set-requirements trailing --pat-scopes must write nothing"; fail=1; }
+
+# --- set-requirements after enable-program + set-output preserves all prior keys ---
+rm -rf "$PROGRAMS_DIR"
+REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" enable-program --program pr-review
+REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-output --program pr-review --mode same
+REPOMAN_PROGRAMS_DIR="$PROGRAMS_DIR" bash "$SETUP" set-requirements --program pr-review --pat-scopes repo --labels-required ready-for-ai-review
+got=$(jq -cS '{e:.enabled,m:.output_repo.mode,ps:.pat_scopes,lr:.labels_required}' "$PROGRAMS_DIR/pr-review.json")
+want=$(jq -cS -n '{e:true,m:"same",ps:["repo"],lr:["ready-for-ai-review"]}')
+[ "$got" = "$want" ] || { echo "FAIL set-requirements full-merge: got [$got] want [$want]"; fail=1; }
+
 [ "$fail" -eq 0 ] \
-  && echo "PASS: repoman-setup.sh (init-config, add-repo, enable-program, set-output)" \
+  && echo "PASS: repoman-setup.sh (init-config, add-repo, enable-program, set-output, set-requirements)" \
   || exit 1

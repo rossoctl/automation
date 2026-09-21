@@ -57,6 +57,12 @@ Subcommands:
       Merge {"output_repo": {...}} into programs/<name>.json.
       --repo is required (and validated as owner/name) iff --mode central.
 
+  set-requirements --program <name> [--pat-scopes <csv>] \
+      [--labels-required <csv>] [--labels-applied <csv>]
+      Merge {pat_scopes, labels_required, labels_applied} (each parsed from a
+      comma-separated value into a JSON array) into programs/<name>.json. A
+      missing or empty CSV yields [].
+
 Each subcommand also accepts --help.
 
 Path overrides (same as the reader):
@@ -471,6 +477,98 @@ EOF
 }
 
 # =============================================================================
+# set-requirements
+# =============================================================================
+
+cmd_set_requirements() {
+  if [ "${1:-}" = "--help" ]; then
+    cat <<'EOF'
+Usage: repoman-setup.sh set-requirements --program <name> \
+         [--pat-scopes <csv>] [--labels-required <csv>] [--labels-applied <csv>]
+
+Merge {pat_scopes, labels_required, labels_applied} (each a JSON array parsed
+from a comma-separated value) into programs/<name>.json, overridable via
+REPOMAN_PROGRAMS_DIR. <name> is checked against the known-program allowlist.
+Pure writer: no gh, no SKILL.md read. Takes ALREADY-RESOLVED values (the
+setup skill parses SKILL.md via repoman_parse_requirements and passes the
+CSVs here). A missing or empty CSV yields []. JSON merge: existing keys
+(enabled, output_repo) survive.
+EOF
+    return 0
+  fi
+
+  local program="" pat_scopes="" labels_required="" labels_applied=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --program)
+        # Guard arity before `shift 2` (see init-config): a trailing flag with
+        # no value would abort silently under set -e otherwise.
+        [ $# -ge 2 ] || { echo "ERROR: set-requirements: --program requires a value." >&2; return 1; }
+        program="$2"
+        shift 2
+        ;;
+      --pat-scopes)
+        [ $# -ge 2 ] || { echo "ERROR: set-requirements: --pat-scopes requires a value." >&2; return 1; }
+        pat_scopes="$2"
+        shift 2
+        ;;
+      --labels-required)
+        [ $# -ge 2 ] || { echo "ERROR: set-requirements: --labels-required requires a value." >&2; return 1; }
+        labels_required="$2"
+        shift 2
+        ;;
+      --labels-applied)
+        [ $# -ge 2 ] || { echo "ERROR: set-requirements: --labels-applied requires a value." >&2; return 1; }
+        labels_applied="$2"
+        shift 2
+        ;;
+      *)
+        echo "ERROR: set-requirements: unknown flag: $1" >&2
+        return 1
+        ;;
+    esac
+  done
+
+  if [ -z "$program" ]; then
+    echo "ERROR: set-requirements: --program is required and must be non-empty." >&2
+    return 1
+  fi
+  if ! is_known_program "$program"; then
+    echo "ERROR: set-requirements: unknown program '$program'. Known programs: $KNOWN_PROGRAMS" >&2
+    return 1
+  fi
+
+  # CSV -> compact JSON array (trim items, drop empties). Local to the
+  # writer; does NOT source the parser (pure-writer module boundary). No
+  # sort: matches the Task 1 SKILL.md parser's ordering contract, which
+  # preserves author-declared order end to end (SKILL.md -> parser -> this
+  # writer). Re-sorting here would silently reorder what the parser produced.
+  _csv_to_json_array() {
+    printf '%s' "$1" | jq -R -s '
+      split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))'
+  }
+  local j_ps j_lr j_la
+  j_ps=$(_csv_to_json_array "$pat_scopes")
+  j_lr=$(_csv_to_json_array "$labels_required")
+  j_la=$(_csv_to_json_array "$labels_applied")
+  unset -f _csv_to_json_array
+
+  local programs_dir="${REPOMAN_PROGRAMS_DIR:-$HOME/.repoman/programs}"
+  local target="$programs_dir/$program.json"
+  local existing="{}"
+  if [ -f "$target" ]; then
+    existing=$(cat "$target")
+  fi
+
+  local merged
+  merged=$(jq -n --argjson existing "$existing" \
+    --argjson ps "$j_ps" --argjson lr "$j_lr" --argjson la "$j_la" \
+    '$existing + {pat_scopes: $ps, labels_required: $lr, labels_applied: $la}')
+
+  atomic_write "$target" "$merged"
+}
+
+# =============================================================================
 # Dispatch
 # =============================================================================
 
@@ -495,6 +593,9 @@ main() {
       ;;
     set-output)
       cmd_set_output "$@"
+      ;;
+    set-requirements)
+      cmd_set_requirements "$@"
       ;;
     *)
       echo "ERROR: unknown subcommand: $subcommand" >&2
