@@ -16,3 +16,5 @@ _LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_LIB_DIR/fork.sh"
 # shellcheck source=/dev/null
 . "$_LIB_DIR/org.sh"
+# shellcheck source=/dev/null
+. "$_LIB_DIR/repoman-requirements.sh"

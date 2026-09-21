@@ -24,6 +24,7 @@ pick_best_candidate
 repoman_config
 repoman_get_repos
 repoman_load_enrolled
+repoman_parse_requirements
 score_path_suffix
 setup_workspace
 validate_issue_fields
@@ -38,7 +39,7 @@ GOT=$(
 )
 
 if [ "$GOT" = "$WANT" ]; then
-  echo "PASS: lib function inventory (24 functions, none lost/renamed)"
+  echo "PASS: lib function inventory (25 functions, none lost/renamed)"
   exit 0
 else
   echo "FAIL: lib function inventory mismatch"
