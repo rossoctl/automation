@@ -1,22 +1,23 @@
 # Link Health Report
 
-> Last scan: 2026-09-16 07:00 ET | Scan ID: 2026-09-16-001
+> Last scan: 2026-09-18 07:00 ET | Scan ID: 2026-09-18-001
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
 | Repos scanned | 8 |
-| Total links checked | 1757 |
+| Total links checked | 1762 |
 | Broken (internal) | 20 |
 | Broken (external) | 7 |
 | New since last scan | +0 |
-| Fixed since last scan | -2 |
+| Fixed since last scan | -0 |
 
 ## Trend (last 10 scans)
 
 | Date | Internal | External | Delta |
 |------|----------|----------|-------|
+| 09-18 | 20 | 7 | 0 |
 | 09-16 | 20 | 7 | -2 |
 | 09-14 | 22 | 7 | 0 |
 | 09-11 | 22 | 7 | +16 |
