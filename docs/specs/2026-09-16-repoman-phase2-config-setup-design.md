@@ -160,9 +160,10 @@ or, when the user chooses a central issue repo:
 ```
 
 Phase 2 writes only the setup-collected fields (`enabled`, `output_repo`).
-The `pat_scopes`/`labels_required`/`labels_applied` the parent spec shows at
-line 99 are read by the Phase 3 capability check and authored there from the
-`### Requirements (machine-readable)` block — Phase 2 never writes them.
+The `pat_scopes`/`labels_required`/`labels_applied` shown in the parent spec's
+"Program invocation flow" (capability-check step) are read by the Phase 3
+capability check and authored there from the `### Requirements
+(machine-readable)` block — Phase 2 never writes them.
 
 ## Output destination semantics
 

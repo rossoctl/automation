@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for scripts/repoman-check.sh (RepoMan Phase 3 Deliverable C).
+# Tests for scripts/repoman-check.sh.
 #
 # Isolation mechanism: repoman-check.sh is invoked as a SUBPROCESS
 # (`bash "$CHECK"`), not sourced, so a function-shadow of `gh` in this test's

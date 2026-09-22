@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RepoMan Phase 3 Deliverable C: invocation-time capability checker.
+# RepoMan invocation-time capability checker.
 #
 # Verifies, BEFORE a program runs, that the active PAT holds the scopes the
 # program's SKILL.md declared (programs/<name>.json: pat_scopes) and reports

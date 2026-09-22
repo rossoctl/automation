@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Single point of parsing for the SKILL.md `## Requirements` machine-readable
-# block (RepoMan Phase 3). Everything downstream consumes the normalized JSON
-# this emits; nothing else parses SKILL.md.
+# Single point of parsing for the SKILL.md `### Requirements (machine-readable)`
+# block. Everything downstream consumes the normalized JSON this emits; nothing
+# else parses SKILL.md.
 #
 # ## Portability
 # Targets bash 3.2+ (macOS default): no mapfile, no declare -A, no associative
