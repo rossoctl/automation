@@ -27,7 +27,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
-. "$SCRIPT_DIR/../scripts/program-lib.sh"
+. "$SCRIPT_DIR/program-lib.sh"
 
 usage() {
   cat <<'EOF'
