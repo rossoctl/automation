@@ -21,6 +21,9 @@ repoman_parse_requirements() {
   fi
 
   local in_block=0 line key body
+  # Per-bullet list-splitting scratch (declared here, not inside the loop, so
+  # block-scoping expectations are not misled; reset per bullet at use site).
+  local IFS_SAVE item items
   # Newline-delimited item accumulators, one per recognized key.
   local pat_scopes="" labels_required="" labels_applied="" programs=""
 
@@ -49,7 +52,7 @@ repoman_parse_requirements() {
           esac
           # Strip brackets, split on commas, trim, append non-empty items.
           body="${body#[}"; body="${body%]}"
-          local IFS_SAVE="$IFS" item items=""
+          IFS_SAVE="$IFS"; items=""
           IFS=','
           for item in $body; do
             # trim leading/trailing whitespace

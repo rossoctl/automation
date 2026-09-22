@@ -17,8 +17,8 @@ labels it requires to be *useful*, and if not, exactly how does the user close
 the gap?
 
 The check is grounded in a data flow already reserved by Phases 1 and 2. Each
-skill declares its needs in a machine-readable `## Requirements` block in its
-`SKILL.md` (authored in `rossoctl/agent-skills`). That block is read **once at
+skill declares its needs in a machine-readable `### Requirements
+(machine-readable)` block in its `SKILL.md` (authored in `rossoctl/agent-skills`). That block is read **once at
 setup** and merged into the program's config file (`programs/<name>.json`,
 written by the Phase 2 pure writer). The checker reads that config file plus
 `repos.json` (via the Phase 1 reader) at **every invocation**. The checker
@@ -27,7 +27,7 @@ never parses `SKILL.md` at runtime.
 ## Relationship to Phases 1 and 2 (data flow)
 
 ```
-rossoctl/agent-skills  SKILL.md  (## Requirements block — authoring source)
+rossoctl/agent-skills  SKILL.md  (### Requirements block — authoring source)
    │
    │  read ONCE at setup, when the user picks programs
    │  (parsed by repoman_parse_requirements; values passed to the writer)
@@ -54,7 +54,7 @@ overwrite").
 
 | # | Deliverable | Repo |
 |---|---|---|
-| A | `## Requirements` block folded into `## Prerequisites` in each program's `SKILL.md` | `rossoctl/agent-skills` |
+| A | `### Requirements (machine-readable)` block folded into `## Prerequisites` in each program's `SKILL.md` | `rossoctl/agent-skills` |
 | B | `repoman_parse_requirements` (lib) + `repoman-setup.sh set-requirements` subcommand (pure writer) | `rossoctl/automation` |
 | C | `scripts/repoman-check.sh` invocation-time checker + `gh_with_backoff` ported into `github-api.sh` | `rossoctl/automation` |
 
@@ -65,7 +65,7 @@ agent-skills-resident deliverable (verified against the #74/#75/#76/#77 issue
 bodies), so the cross-repo workflow is established here at the smallest phase
 and reused later.
 
-## Deliverable A — the `## Requirements` grammar
+## Deliverable A — the `### Requirements (machine-readable)` grammar
 
 Authored in each program's `SKILL.md`, **folded into the existing
 `## Prerequisites` section** (a machine-readable block alongside the human
@@ -117,7 +117,7 @@ each script's actual `gh` calls and label usage, not guessed.
 
 ### Single point of parsing
 
-The `## Requirements` block is parsed in exactly one place. Everything
+The `### Requirements (machine-readable)` block is parsed in exactly one place. Everything
 downstream consumes already-resolved values. This keeps the Phase 2 pure-writer
 contract intact and prevents two parsers drifting.
 

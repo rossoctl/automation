@@ -54,6 +54,11 @@ case "\$*" in
     for lbl in \${GH_STUB_LABELS-}; do printf '%s\tsome description\t#ededed\n' "\$lbl"; done
     exit 0 ;;
   *"label create"*)
+    # GH_STUB_CREATE_FAILS=1 makes creation fail, exercising the checker's
+    # "attempted to create ... but the create call failed" branch.
+    if [ "\${GH_STUB_CREATE_FAILS-0}" = "1" ]; then
+      echo "HTTP 403: label create forbidden" >&2; exit 1
+    fi
     echo "created"; exit 0 ;;
   *) echo "unhandled gh args: \$*" >&2; exit 2 ;;
 esac
@@ -104,6 +109,17 @@ case "$out" in *"gh label create"*) ;; *) echo "FAIL should instruct gh label cr
 out=$(GH_STUB_SCOPES="repo" GH_STUB_LABELS="" GH_STUB_ACCEPTED="repo" run_check --program pr-review --create-missing-labels); rc=$?
 [ "$rc" -eq 0 ] || { echo "FAIL create-flag should exit 0: rc=$rc"; fail=1; }
 case "$out" in *"created"*|*"Created"*) ;; *) echo "FAIL create-flag should report creation, got: [$out]"; fail=1 ;; esac
+
+# --- label missing, --create-missing-labels, but the create call FAILS ->
+# warns that creation was attempted and failed, still exit 0 (label gaps never
+# hard-fail), and hands back the manual gh label create command ---
+out=$(GH_STUB_SCOPES="repo" GH_STUB_LABELS="" GH_STUB_ACCEPTED="repo" GH_STUB_CREATE_FAILS=1 run_check --program pr-review --create-missing-labels); rc=$?
+[ "$rc" -eq 0 ] || { echo "FAIL create-failure is a label gap, should still exit 0: rc=$rc out=[$out]"; fail=1; }
+case "$out" in
+  *"attempted to create"*"failed"*) ;;
+  *) echo "FAIL create-failure should warn 'attempted to create ... failed', got: [$out]"; fail=1 ;;
+esac
+case "$out" in *"gh label create"*) ;; *) echo "FAIL create-failure should hand back the manual gh label create command, got: [$out]"; fail=1 ;; esac
 
 # --- label missing, PAT CANNOT create -> web UI remediation, NO gh label create command ---
 out=$(GH_STUB_SCOPES="read:org" GH_STUB_LABELS="" GH_STUB_ACCEPTED="repo" run_check --program pr-review); rc=$?
