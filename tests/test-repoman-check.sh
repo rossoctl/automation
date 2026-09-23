@@ -31,6 +31,12 @@ cat > "$STUB_DIR/gh" <<STUB
 # this test honest — a checker that parsed the bare table would fail here.
 case "\$*" in
   *"-i user"*)
+    # GH_STUB_USER_FAILS=1 simulates a transport/auth failure (not rate-limit),
+    # so gh_with_backoff returns 1 with empty stdout. The message must NOT match
+    # gh_with_backoff's rate-limit pattern (rate limit|403|429), or it would retry.
+    if [ "\${GH_STUB_USER_FAILS-0}" = "1" ]; then
+      echo "could not connect to api.github.com" >&2; exit 1
+    fi
     printf 'X-OAuth-Scopes: %s\r\n' "\${GH_STUB_SCOPES-repo}"
     printf '\r\n{}\n'
     exit 0 ;;
@@ -45,6 +51,11 @@ case "\$*" in
     printf '%s\n' "\${GH_STUB_PRIVATE-false}"
     exit 0 ;;
   *"label list"*"--json name"*)
+    # GH_STUB_LIST_FAILS=1 simulates a list failure (repo gone, perms, 5xx),
+    # non-rate-limit so gh_with_backoff returns 1 with empty stdout.
+    if [ "\${GH_STUB_LIST_FAILS-0}" = "1" ]; then
+      echo "could not resolve repository" >&2; exit 1
+    fi
     # The checker asks for bare names one per line via --json name --jq '.[].name'.
     printf '%s\n' "\${GH_STUB_LABELS-}"
     exit 0 ;;
@@ -100,6 +111,19 @@ out=$(GH_STUB_SCOPES="" GH_STUB_LABELS="ready-for-ai-review" run_check --program
 [ "$rc" -ne 0 ] || { echo "FAIL empty-scope (fine-grained) should hard-fail"; fail=1; }
 case "$out" in *"fine-grained"*) ;; *) echo "FAIL fine-grained should be named, got: [$out]"; fail=1 ;; esac
 
+# --- transport/auth failure on `gh api -i user` -> hard fail, but reported as a
+# transport/auth problem, NOT misdiagnosed as a fine-grained token. This is the
+# distinction the empty-stdout-on-failure guard exists to preserve. ---
+out=$(GH_STUB_USER_FAILS=1 GH_STUB_LABELS="ready-for-ai-review" run_check --program pr-review); rc=$?
+[ "$rc" -ne 0 ] || { echo "FAIL transport failure on 'api -i user' should hard-fail: rc=$rc"; fail=1; }
+case "$out" in
+  *"transport or authentication failure"*) ;;
+  *) echo "FAIL transport failure should be named a transport/auth problem, got: [$out]"; fail=1 ;;
+esac
+case "$out" in
+  *"fine-grained"*) echo "FAIL transport failure must NOT be misdiagnosed as a fine-grained token: [$out]"; fail=1 ;;
+esac
+
 # --- label missing, PAT can create, no flag -> instructs gh label create, exit 0 ---
 out=$(GH_STUB_SCOPES="repo" GH_STUB_LABELS="" GH_STUB_ACCEPTED="repo" run_check --program pr-review); rc=$?
 [ "$rc" -eq 0 ] || { echo "FAIL label-missing-createable should not hard-fail: rc=$rc"; fail=1; }
@@ -134,6 +158,24 @@ esac
 case "$out" in
   *"gh label create"*) echo "FAIL under-scoped-for-create must NOT emit a gh label create command"; fail=1 ;;
 esac
+
+# --- `gh label list` FAILS for a repo -> one "could not list labels" warning,
+# NOT every required label reported missing, and still exit 0 (label gaps never
+# hard-fail). Use two required labels so the "one finding, not N" claim bites. ---
+echo '[{"owner":"alice","name":"tool"}]' > "$REPOS_FILE"
+echo '{"pat_scopes":["repo"],"labels_required":["ready-for-ai-review","needs-triage"]}' > "$PROGRAMS_DIR/pr-review.json"
+out=$(GH_STUB_SCOPES="repo" GH_STUB_ACCEPTED="repo" GH_STUB_LIST_FAILS=1 run_check --program pr-review); rc=$?
+[ "$rc" -eq 0 ] || { echo "FAIL list-failure is a label-side gap, should still exit 0: rc=$rc out=[$out]"; fail=1; }
+case "$out" in
+  *"could not list labels on alice/tool"*) ;;
+  *) echo "FAIL list-failure should warn it could not list labels, got: [$out]"; fail=1 ;;
+esac
+case "$out" in
+  *"'ready-for-ai-review' missing"*|*"'needs-triage' missing"*)
+    echo "FAIL list-failure must not report required labels as missing: [$out]"; fail=1 ;;
+esac
+# restore program config for subsequent cases
+echo '{"pat_scopes":["repo"],"labels_required":["ready-for-ai-review"]}' > "$PROGRAMS_DIR/pr-review.json"
 
 # --- multi-repo aggregation: two repos both missing the label, both reported ---
 echo '[{"owner":"alice","name":"tool"},{"owner":"bob","name":"kit"}]' > "$REPOS_FILE"

@@ -43,7 +43,7 @@ repoman_parse_requirements() {
           body="${line#*: }"
           case "$key" in
             pat_scopes|labels_required|labels_applied|programs) ;;
-            *) echo "ERROR: repoman_parse_requirements: unknown key '$key' in Requirements block of $skill_md" >&2; return 1 ;;
+            *) echo "ERROR: repoman_parse_requirements: unknown key '$key' in Requirements block of $skill_md (recognized keys: pat_scopes, labels_required, labels_applied, programs; the block accepts no prose bullets -- put notes outside the block)" >&2; return 1 ;;
           esac
           # Value must be bracketed.
           case "$body" in

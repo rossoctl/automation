@@ -87,7 +87,19 @@ check_scopes() {
   local required="$1"
   local hdr scopes_line scopes_value req missing=""
 
-  hdr=$(gh_with_backoff api -i user | tr -d '\r')
+  # gh_with_backoff writes its error to stderr and returns 1 on a non-rate-limit
+  # failure, so an unguarded `$(...)` would capture an empty string and fall
+  # through to the empty-scopes branch below, misreporting a transport/auth
+  # failure as "fine-grained token". Check the status explicitly ($SCRIPT set
+  # -e is off by design). tr -d '\r' must run on its own line, not piped inside
+  # the substitution -- there the status would be tr's, not gh's.
+  if ! hdr=$(gh_with_backoff api -i user); then
+    add_finding "SCOPE FAIL: could not query the active token via 'gh api -i user' (see stderr above). This is a transport or authentication failure, not a token-type problem -- check 'gh auth status' and network reachability, then re-run."
+    scope_gate_failed=1
+    PAT_SCOPES=""
+    return
+  fi
+  hdr=$(printf '%s' "$hdr" | tr -d '\r')
 
   scopes_line=$(printf '%s\n' "$hdr" | grep -i '^X-OAuth-Scopes:' | head -1)
   scopes_value="${scopes_line#*:}"
@@ -139,6 +151,10 @@ CACHE_DIR=""
 
 init_probe_cache() {
   CACHE_DIR=$(mktemp -d)
+  # Clean up unconditionally: cleanup_probe_cache is also called on the happy
+  # path, but a trap catches SIGINT (plausible during a wide per-repo label
+  # loop) and any future early return between init and the explicit cleanup.
+  trap 'cleanup_probe_cache' EXIT INT TERM
 }
 
 cleanup_probe_cache() {
@@ -215,7 +231,14 @@ check_labels() {
 
   # `gh label list` prints a TSV table (name<TAB>description<TAB>color); ask for
   # bare names one per line so the whole-line match below is correct.
-  existing=$(gh_with_backoff label list --repo "$repo" --json name --jq '.[].name')
+  # Guard the call: on failure (repo renamed/deleted, permissions, transient
+  # 5xx) gh_with_backoff returns 1 with empty stdout, and an unchecked capture
+  # would report every required label as missing on this repo. Skip the repo's
+  # label check instead, so one unreachable repo is one finding, not N false gaps.
+  if ! existing=$(gh_with_backoff label list --repo "$repo" --json name --jq '.[].name'); then
+    add_finding "LABEL WARN: could not list labels on $repo (see stderr above); skipping its label check rather than reporting every required label as missing."
+    return
+  fi
 
   while IFS= read -r label || [ -n "$label" ]; do
     [ -n "$label" ] || continue
