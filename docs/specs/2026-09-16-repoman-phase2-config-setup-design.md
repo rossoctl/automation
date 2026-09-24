@@ -42,9 +42,10 @@ live in the skill.
   the scanner skills use (#37/#38 companions).
 
 **NOT in Phase 2 (owned elsewhere, called out to prevent scope creep):**
-- `pat_scopes` / `labels` in `programs/<name>.json` and the per-program
-  capability check — **Phase 3 (#74)**, drawn from each skill's
-  `## Requirements` block, run at invocation.
+- `pat_scopes` / `labels_required` / `labels_applied` in
+  `programs/<name>.json` and the per-program capability check —
+  **Phase 3 (#74)**, drawn from each skill's `### Requirements
+  (machine-readable)` block, run at invocation.
 - Fork creation — deferred to the fixer path (see §Fork creation below).
 - Clone/refresh of repos — **Phase 4 (#75)** repo-sync.
 - `_index.json` program registry and dashboard wiring — **Phase 5 (#76)**.
@@ -95,8 +96,8 @@ Every subcommand supports `--help` (the SKILL.md instructs the agent to run
 it first, matching the scanner-skill convention).
 
 `enable-program` and `set-output` perform a JSON **merge**, not an overwrite,
-so Phase 3 can add `pat_scopes`/`labels` to the same file without clobbering
-the setup-collected fields.
+so Phase 3 can add `pat_scopes`/`labels_required`/`labels_applied` to the same
+file without clobbering the setup-collected fields.
 
 ### Shared `validate_repos_dir` (Phase 1 `org.sh`) touch-up
 
@@ -159,9 +160,10 @@ or, when the user chooses a central issue repo:
 ```
 
 Phase 2 writes only the setup-collected fields (`enabled`, `output_repo`).
-The `pat_scopes`/`labels` the parent spec shows at line 99 are read by the
-Phase 3 capability check and authored there from the `## Requirements`
-block — Phase 2 never writes them.
+The `pat_scopes`/`labels_required`/`labels_applied` shown in the parent spec's
+"Program invocation flow" (capability-check step) are read by the Phase 3
+capability check and authored there from the `### Requirements
+(machine-readable)` block — Phase 2 never writes them.
 
 ## Output destination semantics
 
@@ -299,6 +301,7 @@ message.
 
 - #39 closes only when both the config half (this phase) and the fork half
   (fixer lazy-fork path) land.
-- `programs/<name>.json` gains `pat_scopes`/`labels` in Phase 3 (#74) via
-  JSON-merge; the schema here reserves room for them by never overwriting.
+- `programs/<name>.json` gains `pat_scopes`/`labels_required`/`labels_applied`
+  in Phase 3 (#74) via JSON-merge; the schema here reserves room for them by
+  never overwriting.
 - `fork_owner` semantics are revisited if #82 adopts GitHub App auth.

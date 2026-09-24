@@ -96,7 +96,13 @@ repoman run link-health-scanner
   │     Not asked again unless user resets config.
   │
   ├─► capability check (every invocation, fast):
-  │     reads ~/.repoman/programs/link-health.json { pat_scopes, labels }
+  │     reads ~/.repoman/programs/link-health.json
+  │             { pat_scopes, labels_required, labels_applied }
+  │     scope gate: O(1) — parse X-OAuth-Scopes once
+  │     per repo: O(#repos) label-list calls; missing-label
+  │       create-capability from cached accepted scopes
+  │       (O(1) probes, keyed on repo visibility)
+  │     all calls backoff-protected (gh_with_backoff)
   │     checks each repo in repos.json
   │     if gaps: "alice/tool is missing broken-link labels.
   │               Fix now / skip this repo / disable program?"
@@ -214,7 +220,7 @@ structurally, because there are no local copies to drift.
 ```
 rossoctl/agent-skills (canonical)
   skills/link-health-scanner/
-    SKILL.md          ◄── includes ## Requirements block (machine-readable)
+    SKILL.md          ◄── ## Prerequisites → ### Requirements (machine-readable)
     scripts/
     reference/
          │
@@ -233,14 +239,20 @@ rossoctl/agent-skills (canonical)
       }
 ```
 
-The `## Requirements` block in each SKILL.md declares what the skill needs. This is the source
-RepoMan's capability check reads. It must be parseable by mid-to-low tier models without
-inference, so it uses an explicit key-value format rather than prose.
+A `### Requirements (machine-readable)` sub-block, folded into each SKILL.md's `## Prerequisites`
+section, declares what the skill needs. This is the source RepoMan's capability check reads (parsed
+once at setup into `programs/<name>.json`, never re-parsed at invocation). It must be parseable by
+mid-to-low tier models without inference, so it uses an explicit key-value format rather than prose.
+`labels_required` are labels the skill consumes (checked by the capability gate); `labels_applied`
+are labels the skill only emits (output-only, never gated).
 
 ```markdown
-## Requirements
+## Prerequisites
+...
+### Requirements (machine-readable)
 - pat_scopes: [repo, read:org]
-- labels: [broken-link/internal, broken-link/external]
+- labels_required: [broken-link/internal]
+- labels_applied: [broken-link/internal, broken-link/external]
 - programs: [scanner, fixer]
 ```
 
