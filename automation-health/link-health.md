@@ -1,22 +1,23 @@
 # Link Health Report
 
-> Last scan: 2026-09-23 07:00 ET | Scan ID: 2026-09-23-001
+> Last scan: 2026-09-25 07:01 ET | Scan ID: 2026-09-25-001
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
 | Repos scanned | 8 |
-| Total links checked | 1770 |
-| Broken (internal) | 20 |
-| Broken (external) | 6 |
-| New since last scan | +0 |
-| Fixed since last scan | -1 |
+| Total links checked | 2208 |
+| Broken (internal) | 21 |
+| Broken (external) | 10 |
+| New since last scan | +5 |
+| Fixed since last scan | -0 |
 
 ## Trend (last 10 scans)
 
 | Date | Internal | External | Delta |
 |------|----------|----------|-------|
+| 09-25 | 21 | 10 | +5 |
 | 09-23 | 20 | 6 | -1 |
 | 09-18 | 20 | 7 | 0 |
 | 09-16 | 20 | 7 | -2 |
@@ -28,9 +29,9 @@
 
 | Repo | Internal | External | Issues |
 |------|----------|----------|--------|
-| .github | 2 | 2 | 0 |
+| .github | 3 | 2 | 0 |
 | agent-skills | 3 | 0 | 0 |
-| cortex | 9 | 0 | 0 |
+| cortex | 9 | 4 | 0 |
 | examples | 1 | 1 | 0 |
 | operator | 3 | 0 | 0 |
 | rossoctl | 0 | 3 | 0 |
