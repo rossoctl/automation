@@ -33,7 +33,7 @@ done
 repoman_config
 
 # --- Configuration ---
-REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-health}"
 
 # Report-PR destination. The org main repo's docs/ folder feeds the docs site
 # (rossoctl.dev) and cannot host machine-generated reports, so the standing
@@ -362,6 +362,20 @@ HIST_EOF
 
 append_history_row "$REPORTS_DIR" "$HISTORY_ROW" "$MAX_HISTORY_ROWS"
 echo "Appended to history.json"
+
+# --- Register in the program registry (Phase 5) ---
+# The index lives beside the program report dirs (parent of REPORTS_DIR);
+# REPOMAN_INDEX_FILE overrides for tests/dogfood. A failed index write must
+# NOT fail an otherwise successful scan (the reports are the primary
+# product) -- but it is logged, not swallowed silently.
+index_file="${REPOMAN_INDEX_FILE:-$(dirname "$REPORTS_DIR")/_index.json}"
+if ! "$SCRIPT_DIR/repoman-index.sh" \
+      --index "$index_file" \
+      --program link-health \
+      --display-name "Link Health" \
+      --report-path "$REPORTS_DIR"; then
+  echo "WARNING: failed to update program registry at $index_file (scan reports were still written)" >&2
+fi
 
 # --- Update docs/link-health.md ---
 # Build trend table from last 10 history entries (deduplicate same-day rows)
