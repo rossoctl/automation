@@ -21,12 +21,14 @@ DRY_RUN=true
 VERBOSE=false
 SHOW_HELP=false
 MAIN_REPO_DIR="${MAIN_REPO_DIR:-}"
+INDEX_FILE_ARG=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --dry-run) DRY_RUN=true; shift ;;
     --live) DRY_RUN=false; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
+    --index) INDEX_FILE_ARG="$2"; shift 2 ;;
     --main-repo-dir) MAIN_REPO_DIR="$2"; shift 2 ;;
     --verbose) VERBOSE=true; shift ;;
     --help|-h) SHOW_HELP=true; shift ;;
@@ -48,16 +50,21 @@ Options:
   --dry-run           Generate and preview dashboard (default)
   --live              Commit and push to fork, create/update PR
   --reports-dir DIR    Base reports directory (default: $REPORTS_DIR or ./reports)
+  --index PATH         Path to _index.json (default: $REPOMAN_INDEX_FILE or
+                       <reports-dir>/_index.json). When present, drives which
+                       programs render and their headings; falls back to
+                       disk-derived discovery when absent.
   --main-repo-dir DIR  Path to the report-target repo clone, overriding the
                        REPOS_DIR-derived default (default: $MAIN_REPO_DIR)
   --verbose            Print diagnostic output
   --help, -h           Show this help
 
 Environment:
-  REPORTS_DIR    Base directory containing link-scan/ and dep-bump/ subdirs
-  MAIN_REPO_DIR  Path to the report-target repo clone (live mode git ops);
-                 overrides the REPOS_DIR-derived default
-  FORK_OWNER     Fork owner for cross-fork PRs
+  REPORTS_DIR        Base directory containing program report subdirs
+  REPOMAN_INDEX_FILE Path to _index.json (default: <reports-dir>/_index.json)
+  MAIN_REPO_DIR      Path to the report-target repo clone (live mode git ops);
+                     overrides the REPOS_DIR-derived default
+  FORK_OWNER         Fork owner for cross-fork PRs
 HELP
   exit 0
 fi
@@ -93,22 +100,80 @@ if [ -z "${REPORTS_DIR:-}" ]; then
   fi
 fi
 
-LINK_SCAN_DIR="$REPORTS_DIR/link-scan"
-DEP_BUMP_DIR="$REPORTS_DIR/dep-bump"
+INDEX_FILE="${INDEX_FILE_ARG:-${REPOMAN_INDEX_FILE:-$REPORTS_DIR/_index.json}}"
 
+# Program-id -> display-name lookup (bash 3.2 safe, no assoc arrays). Only ids
+# listed here have a corresponding extraction block further down; an index
+# entry for any other id is a known/skippable program, not an error.
+display_name_for() {
+  case "$1" in
+    link-health) echo "Link Health" ;;
+    dep-bump)    echo "Dependency Bumps" ;;
+    *)           echo "" ;;
+  esac
+}
+
+LINK_SCAN_DIR=""
+DEP_BUMP_DIR=""
 HAS_LINK_HEALTH=false
 HAS_DEP_BUMP=false
+LINK_HEALTH_HEADING="Link Health"
+DEP_BUMP_HEADING="Dependency Bumps"
 
-if [ -f "$LINK_SCAN_DIR/latest.json" ] && [ -f "$LINK_SCAN_DIR/history.json" ]; then
-  HAS_LINK_HEALTH=true
-fi
-if [ -f "$DEP_BUMP_DIR/latest.json" ] && [ -f "$DEP_BUMP_DIR/history.json" ]; then
-  HAS_DEP_BUMP=true
+if [ -f "$INDEX_FILE" ]; then
+  if ! jq empty "$INDEX_FILE" >/dev/null 2>&1; then
+    echo "ERROR: Index file is not valid JSON: $INDEX_FILE"
+    exit 1
+  fi
+
+  while IFS= read -r prog_id; do
+    [ -z "$prog_id" ] && continue
+    known_heading=$(display_name_for "$prog_id")
+    if [ -z "$known_heading" ]; then
+      echo "Skipping unknown program id from index (no extraction block): $prog_id"
+      continue
+    fi
+
+    entry_path=$(jq -r --arg id "$prog_id" '.[$id].report_path // ""' "$INDEX_FILE")
+    entry_display=$(jq -r --arg id "$prog_id" '.[$id].display_name // ""' "$INDEX_FILE")
+    [ -z "$entry_display" ] && entry_display="$known_heading"
+
+    if [ -z "$entry_path" ] || [ ! -f "$entry_path/latest.json" ] || [ ! -f "$entry_path/history.json" ]; then
+      echo "Skipping program with missing reports: $prog_id ($entry_path)"
+      continue
+    fi
+
+    case "$prog_id" in
+      link-health)
+        LINK_SCAN_DIR="$entry_path"
+        HAS_LINK_HEALTH=true
+        LINK_HEALTH_HEADING="$entry_display"
+        ;;
+      dep-bump)
+        DEP_BUMP_DIR="$entry_path"
+        HAS_DEP_BUMP=true
+        DEP_BUMP_HEADING="$entry_display"
+        ;;
+    esac
+  done < <(jq -r 'keys[]' "$INDEX_FILE")
+else
+  # Disk-derived fallback: no index, probe the known report subdirs directly.
+  LINK_SCAN_DIR="$REPORTS_DIR/link-health"
+  DEP_BUMP_DIR="$REPORTS_DIR/dep-bump"
+
+  if [ -f "$LINK_SCAN_DIR/latest.json" ] && [ -f "$LINK_SCAN_DIR/history.json" ]; then
+    HAS_LINK_HEALTH=true
+    LINK_HEALTH_HEADING=$(display_name_for "link-health")
+  fi
+  if [ -f "$DEP_BUMP_DIR/latest.json" ] && [ -f "$DEP_BUMP_DIR/history.json" ]; then
+    HAS_DEP_BUMP=true
+    DEP_BUMP_HEADING=$(display_name_for "dep-bump")
+  fi
 fi
 
 if [ "$HAS_LINK_HEALTH" = false ] && [ "$HAS_DEP_BUMP" = false ]; then
   echo "ERROR: No program reports found in $REPORTS_DIR"
-  echo "Expected: $LINK_SCAN_DIR/latest.json and/or $DEP_BUMP_DIR/latest.json"
+  echo "Expected: $REPORTS_DIR/link-health/latest.json and/or $REPORTS_DIR/dep-bump/latest.json"
   exit 1
 fi
 
@@ -382,7 +447,7 @@ cat > "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 | Programs active | $PROGRAMS_ACTIVE |
 | Last successful scan | $LAST_SCAN_DATE |
 
-## Link Health
+## $LINK_HEALTH_HEADING
 
 | Metric | Value | Trend |
 |--------|-------|-------|
@@ -399,7 +464,7 @@ cat > "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 |------|----------|----------|-------|
 $LH_TREND_TABLE
 
-## Dependency Bumps
+## $DEP_BUMP_HEADING
 
 | Metric | Value | Trend |
 |--------|-------|-------|
