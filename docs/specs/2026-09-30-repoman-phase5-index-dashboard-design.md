@@ -28,8 +28,10 @@ Phase 5 delivers three things:
    headings from registry data, falling back to disk-derived discovery when the
    index is absent.
 
-The companion `skills/automation-health-dashboard/SKILL.md` in agent-skills
-gets prose-only updates to match the new discovery behavior.
+On the agent-skills side, the stale dashboard script copy is resynced with the
+authoritative automation copy (a wholesale port, folding in [#100](https://github.com/rossoctl/automation/issues/100)),
+the Phase 5 discovery changes are applied to it in lockstep so both copies stay
+identical, and its `SKILL.md` prose is updated to match.
 
 ## Scope and non-scope
 
@@ -46,8 +48,16 @@ gets prose-only updates to match the new discovery behavior.
   `_index.json` (path passed in), with disk-derived fallback when absent.
 - `tests/test-automation-health-dashboard.sh` — a new hermetic dashboard test
   (none exists today).
-- Prose-only alignment of `skills/automation-health-dashboard/SKILL.md` in
-  agent-skills.
+- **Resync the agent-skills dashboard script copy (folds in #100).** Replace the
+  ~2-month-stale `skills/automation-health-dashboard/scripts/` copy in
+  agent-skills with the authoritative automation copy — the dashboard script AND
+  its lib set (the modular `core.sh`, `github-api.sh`, `fork.sh`, `org.sh`,
+  `repoman-requirements.sh`, and the thin `program-lib.sh` aggregator that
+  sources them), replacing the old monolithic `program-lib.sh`. Then apply the
+  Phase 5 discovery changes to the agent-skills copy in lockstep so the two are
+  identical. See §Companion for the boundary.
+- Prose alignment of `skills/automation-health-dashboard/SKILL.md` in
+  agent-skills to match the new discovery behavior.
 
 **Explicitly NOT in scope (owned elsewhere, do not implement here):**
 - **No `skill` or `version` field in `_index.json`.** The parent spec's
@@ -64,9 +74,13 @@ gets prose-only updates to match the new discovery behavior.
   principle ("Skills are stateless. All config flows in as runtime parameters").
 - **No decoupling of the pre-existing `repoman_config` calls.** `link-health`,
   `dep-bump`, both fixers, and the dashboard already call `repoman_config`
-  today. Phase 5 does not deepen that coupling and does not fix it — peeling it
-  back is a separate cross-cutting refactor, filed as a follow-up (see
-  Follow-ups). Existing `repoman_config` calls are left untouched.
+  today (the dashboard also hardcodes `REPORT_TARGET_REPO="rossoctl/automation"`).
+  Phase 5 does not deepen that coupling and does not fix it — peeling it back is
+  a separate cross-cutting refactor, filed as a follow-up (see Follow-ups).
+  Existing `repoman_config` calls are left untouched. **In particular, the
+  agent-skills resync ports the automation copy *as-is*, coupling included — the
+  port makes the two copies identical, it does not newly decouple either one.
+  #99 is still the place decoupling happens, for both copies at once.**
 - **No `pr-review` dashboard section — but this is a planned upgrade, not a
   permanent exclusion.** The authoritative dashboard renders link-health and
   dep-bump only today (verified: PR [#95](https://github.com/rossoctl/automation/pull/95)'s
@@ -315,6 +329,15 @@ fixtures; runs `--dry-run` so nothing is posted. Cases:
 6. Index present but invalid JSON → fail loud, exit non-zero, names the file
    (mirrors the writer's corrupt-index stance).
 
+### Dashboard-copy parity
+
+After the resync (§Companion), the automation and agent-skills dashboard scripts
+must be identical. The agent-skills PR asserts this — a `diff` of the two
+dashboard scripts (and of each shared lib) is empty. This is the guard that the
+"keep both copies in sync" intent does not silently rot again; it runs in the
+agent-skills PR, not the automation test suite (the automation suite cannot see
+the agent-skills checkout).
+
 ### Scanner wiring tests
 
 Extend `tests/test-link-health-scanner.sh` / `tests/test-dep-bump-scanner.sh`
@@ -324,15 +347,41 @@ expected id, `display_name`, and `report_path`; and a case where the index write
 fails (writer stubbed non-zero) leaves the scan's own exit status successful but
 logs the index-write failure.
 
-## Companion — agent-skills SKILL.md
+## Companion — agent-skills dashboard resync (#100 folded in)
 
-`skills/automation-health-dashboard/SKILL.md` in rossoctl/agent-skills gets
-prose-only updates: describe that the dashboard discovers programs from
-`_index.json` (path via `--index` / `REPOMAN_INDEX_FILE`), that it falls back to
-disk-derived discovery when the index is absent, and that section headings come
-from the registry's `display_name`. No behavioral skill logic changes. (The
-agent-skills dashboard *script* copy is separately stale versus automation and
-its resync is a follow-up, not this phase.)
+This phase brings the `rossoctl/agent-skills` dashboard skill into sync with
+automation. It has three parts, done in order:
+
+**1. Wholesale script + lib port.** Replace the stale
+`skills/automation-health-dashboard/scripts/` contents with the authoritative
+automation copies:
+
+- `automation-health-dashboard.sh` ← automation's current dashboard script.
+- The lib set: `core.sh`, `github-api.sh`, `fork.sh`, `org.sh`,
+  `repoman-requirements.sh`, and the thin `program-lib.sh` aggregator that
+  sources them — replacing the old ~21 KB monolithic `program-lib.sh`. The
+  aggregator resolves libs relative to its own dir (`$_LIB_DIR`), so the
+  dashboard's `source "$SCRIPT_DIR/program-lib.sh"` works unchanged once all six
+  files sit beside it.
+
+The port is verbatim: it carries the automation copy's existing state as-is,
+including its `repoman_config` call and hardcoded `REPORT_TARGET_REPO`. The port
+does **not** decouple anything — decoupling both copies at once is #99. The
+point of the port is that the two copies stop diverging.
+
+**2. Apply Phase 5 discovery in lockstep.** The `_index.json` discovery,
+disk-derived fallback, and `display_name` headings (Component 3) land in the
+agent-skills copy identically to the automation copy, so after this phase
+`diff` between the two dashboard scripts is empty.
+
+**3. SKILL.md prose.** Update `skills/automation-health-dashboard/SKILL.md` to
+describe that the dashboard discovers programs from `_index.json` (path via
+`--index` / `REPOMAN_INDEX_FILE`), falls back to disk-derived discovery when the
+index is absent, and takes section headings from the registry's `display_name`.
+
+The agent-skills side is its own PR (cross-repo), landing alongside the
+automation PR. The end state: automation and agent-skills dashboard scripts are
+byte-identical and both Phase-5-aware.
 
 ## Dog-fooding
 
@@ -360,11 +409,9 @@ before the phase is considered done.
    today; the architecture spec's Skill-layer principle wants config passed as
    parameters (as `pr-review-scanner.sh` already does with `--reports-dir` /
    `--org` / `--profile`). Cross-cutting; candidate v0.1.1.
-2. **Resync the agent-skills dashboard script copy.** ([#100](https://github.com/rossoctl/automation/issues/100))
-   The `skills/automation-health-dashboard/scripts/` copy in agent-skills is ~2
-   months stale (still `ORG="kagenti"`, pre-rossoctl-rename, carries the old
-   monolithic program-lib) versus the authoritative automation copy. Port the
-   current automation dashboard into agent-skills. Cross-repo; its own unit.
+2. **Resync the agent-skills dashboard script copy** ([#100](https://github.com/rossoctl/automation/issues/100))
+   — **folded into this phase; see §Companion.** Kept here for traceability: the
+   resync is now in Phase 5 scope rather than a deferred follow-up.
 3. **Add a pr-review dashboard section.** ([#101](https://github.com/rossoctl/automation/issues/101))
    The dashboard has no pr-review
    section today, but one was always intended: reviewed-PR counts and the
@@ -385,9 +432,17 @@ Small commits, TDD order:
 5. dashboard index-driven discovery + disk-derived fallback + heading table;
    `tests/test-automation-health-dashboard.sh`.
 
+Then, in the agent-skills PR (cross-repo, §Companion):
+
+6. wholesale port of the automation dashboard script + modular lib set into
+   agent-skills, replacing the stale monolith (verbatim, no decoupling).
+7. apply the Phase 5 discovery changes to the agent-skills copy in lockstep
+   (byte-identical to automation) + SKILL.md prose.
+
 After the committed work, run the local end-to-end dog-food (see Dog-fooding)
 as the final gate before the phase is done. The dog-food harness is a local
 tool and is not part of these commits.
 
-Landed on `feat/repoman-phase5-index-dashboard` in this worktree (based off the
-Phase 4 tip). The agent-skills SKILL.md prose change is its own agent-skills PR.
+The automation-repo work lands on `feat/repoman-phase5-index-dashboard` in this
+worktree (based off the Phase 4 tip). The agent-skills resync (script port +
+Phase 5 changes + SKILL.md) is its own agent-skills PR.
