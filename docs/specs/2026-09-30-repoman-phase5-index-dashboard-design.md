@@ -354,17 +354,19 @@ before the phase is considered done.
 
 ## Follow-ups (file as issues, do not implement here)
 
-1. **Decouple skills from `repoman_config`.** link-health, dep-bump, both
+1. **Decouple skills from `repoman_config`.** ([#99](https://github.com/rossoctl/automation/issues/99))
+   link-health, dep-bump, both
    fixers, and the dashboard read `~/.repoman/config.json` via `repoman_config`
    today; the architecture spec's Skill-layer principle wants config passed as
    parameters (as `pr-review-scanner.sh` already does with `--reports-dir` /
    `--org` / `--profile`). Cross-cutting; candidate v0.1.1.
-2. **Resync the agent-skills dashboard script copy.** The
-   `skills/automation-health-dashboard/scripts/` copy in agent-skills is ~2
+2. **Resync the agent-skills dashboard script copy.** ([#100](https://github.com/rossoctl/automation/issues/100))
+   The `skills/automation-health-dashboard/scripts/` copy in agent-skills is ~2
    months stale (still `ORG="kagenti"`, pre-rossoctl-rename, carries the old
    monolithic program-lib) versus the authoritative automation copy. Port the
    current automation dashboard into agent-skills. Cross-repo; its own unit.
-3. **Add a pr-review dashboard section.** The dashboard has no pr-review
+3. **Add a pr-review dashboard section.** ([#101](https://github.com/rossoctl/automation/issues/101))
+   The dashboard has no pr-review
    section today, but one was always intended: reviewed-PR counts and the
    before/after review-merge-delta impact metrics (the dashboard half of the
    impact-metrics + blog effort). This follow-up wires pr-review into
