@@ -431,6 +431,7 @@ CRON_TABLE="| link-health-scanner | Mon/Wed/Fri 7am ET | $LAST_SCAN_DATE | ok |
 # Step 7: Generate markdown
 # =============================================================================
 
+# Base: header + Executive Summary (always rendered).
 cat > "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 # Automation Health Dashboard
 
@@ -446,6 +447,12 @@ cat > "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 | Estimated hours saved | ${HOURS_SAVED} hrs (at 15 min/resolved issue) |
 | Programs active | $PROGRAMS_ACTIVE |
 | Last successful scan | $LAST_SCAN_DATE |
+DASHBOARD_EOF
+
+# Per-program sections render only when discovery found that program, so an
+# index with only one program does not emit the other's heading (empty section).
+if [ "$HAS_LINK_HEALTH" = true ]; then
+  cat >> "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 
 ## $LINK_HEALTH_HEADING
 
@@ -463,6 +470,11 @@ cat > "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 | Date | Internal | External | Delta |
 |------|----------|----------|-------|
 $LH_TREND_TABLE
+DASHBOARD_EOF
+fi
+
+if [ "$HAS_DEP_BUMP" = true ]; then
+  cat >> "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 
 ## $DEP_BUMP_HEADING
 
@@ -486,6 +498,11 @@ $DB_TIER_TABLE
 | Date | Stale Security | Stale Routine | Delta |
 |------|----------------|---------------|-------|
 $DB_TREND_TABLE
+DASHBOARD_EOF
+fi
+
+# Tail: cross-cutting sections (always rendered).
+cat >> "$TMPDIR/automation-health.md" << DASHBOARD_EOF
 
 ## Cross-Program Coverage
 

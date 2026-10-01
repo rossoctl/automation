@@ -41,6 +41,25 @@ for pair in "index:$INDEX" "program:$PROGRAM" "display-name:$DISPLAY_NAME" "repo
   if [ -z "$val" ]; then echo "ERROR: --$name is required" >&2; usage >&2; exit 2; fi
 done
 
+# Normalize report-path to absolute. The dashboard resolves "$report_path/latest.json"
+# from its own cwd, so a relative value (e.g. dep-bump's default ./reports/dep-bump)
+# would make the dashboard silently skip the program when run from a different dir.
+# Canonicalize via cd+pwd when the dir exists (the real flow writes reports first);
+# otherwise prefix the current dir so a yet-to-exist relative path still stores absolute.
+case "$REPORT_PATH" in
+  /*) : ;;  # already absolute
+  *)
+    if [ -d "$REPORT_PATH" ]; then
+      if ! REPORT_PATH=$(cd "$REPORT_PATH" && pwd); then
+        echo "ERROR: failed to resolve absolute report-path: $REPORT_PATH" >&2
+        exit 1
+      fi
+    else
+      REPORT_PATH="$(pwd)/$REPORT_PATH"
+    fi
+    ;;
+esac
+
 LAST_RUN=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 # Load the current index (empty object if absent); a present-but-invalid index

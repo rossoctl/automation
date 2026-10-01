@@ -37,12 +37,17 @@ out=$(run_dash --index "$IDX" 2>&1); rc=$?
 printf '%s' "$out" | grep -q "Link Health" || { echo "FAIL c1: no Link Health heading"; fail=1; }
 printf '%s' "$out" | grep -q "Dependency Bumps" || { echo "FAIL c1: no Dep heading"; fail=1; }
 
-# Case 2: index with only link-health -> only that section.
+# Case 2: index with only link-health -> only that section (no dep-bump).
+# Both report dirs exist on disk, so a regression that fell through to
+# disk-derived discovery would render Dependency Bumps anyway; the negative
+# assertion gives the index-driven path teeth.
 cat > "$IDX" <<EOF
 {"link-health":{"display_name":"Link Health","report_path":"$REPORTS/link-health","last_run":"2026-09-30T00:00:00Z"}}
 EOF
-out=$(run_dash --index "$IDX" 2>&1)
+out=$(run_dash --index "$IDX" 2>&1); rc=$?
+[ "$rc" -eq 0 ] || { echo "FAIL c2: exit $rc: $out"; fail=1; }
 printf '%s' "$out" | grep -q "Link Health" || { echo "FAIL c2: link-health missing"; fail=1; }
+printf '%s' "$out" | grep -q "Dependency Bumps" && { echo "FAIL c2: dep-bump rendered despite index with only link-health"; fail=1; }
 
 # Case 3: unknown program id -> known sections render, unknown skipped + logged, exit 0.
 cat > "$IDX" <<EOF
