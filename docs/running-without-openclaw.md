@@ -65,14 +65,14 @@ done
 ### 3. Create reports directory
 
 ```bash
-mkdir -p ~/reports/link-scan
+mkdir -p ~/reports/link-health
 ```
 
 ### 4. Configure environment
 
 ```bash
 export REPOS_DIR="$HOME/rossoctl"
-export REPORTS_DIR="$HOME/reports/link-scan"
+export REPORTS_DIR="$HOME/reports/link-health"
 ```
 
 Add these to your shell profile if you want them persistent.
@@ -134,10 +134,10 @@ Claude Code can also interpret the output and take follow-up actions (e.g., "run
 crontab -e
 
 # Scanner: Mon/Wed/Fri at 11:00 UTC
-0 11 * * 1,3,5 cd ~/automation && REPOS_DIR=~/rossoctl REPORTS_DIR=~/reports/link-scan bash scripts/link-health-scanner.sh >> ~/logs/scanner.log 2>&1
+0 11 * * 1,3,5 cd ~/automation && REPOS_DIR=~/rossoctl REPORTS_DIR=~/reports/link-health bash scripts/link-health-scanner.sh >> ~/logs/scanner.log 2>&1
 
 # Fixer: Tue/Thu at 14:00 UTC
-0 14 * * 2,4 cd ~/automation && REPOS_DIR=~/rossoctl REPORTS_DIR=~/reports/link-scan bash scripts/link-health-fixer.sh --live >> ~/logs/fixer.log 2>&1
+0 14 * * 2,4 cd ~/automation && REPOS_DIR=~/rossoctl REPORTS_DIR=~/reports/link-health bash scripts/link-health-fixer.sh --live >> ~/logs/fixer.log 2>&1
 ```
 
 ### GitHub Actions (CI-based)
