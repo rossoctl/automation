@@ -39,7 +39,7 @@ jobs:
         # tests/test-repoman-setup.sh is deliberately NOT listed here because it
         # carries intentional test idioms (SC2088 literal-tilde, SC2034 var read
         # by a sourced function) that are load-bearing for what it asserts.
-        run: shellcheck --severity=warning tests/test-repoman-requirements.sh tests/test-github-api.sh tests/test-repoman-check.sh tests/test-repo-sync.sh
+        run: shellcheck --severity=warning tests/test-repoman-requirements.sh tests/test-github-api.sh tests/test-repoman-check.sh tests/test-repo-sync.sh tests/test-repoman-index.sh tests/test-automation-health-dashboard.sh tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh
       - name: Run test suite
         # NOTE: this list and the shellcheck lists above are EXPLICIT, not globs.
         # A new test file must be added here (and to the relevant shellcheck
@@ -55,7 +55,10 @@ jobs:
                    tests/test-extract-broken-links.sh tests/test-parse-diff-map.sh \
                    tests/test-lib-snapshot.sh tests/test-snapshot-manifest.sh \
                    tests/test-snapshot-secrets.sh tests/test-snapshot-state.sh \
-                   tests/test-snapshot-driver.sh tests/test-snapshot-restore.sh; do
+                   tests/test-snapshot-driver.sh tests/test-snapshot-restore.sh \
+                   tests/test-repoman-index.sh tests/test-automation-health-dashboard.sh \
+                   tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh \
+                   tests/test-github-api.sh; do
             echo "== $t =="
             bash "$t"
           done

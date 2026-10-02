@@ -45,3 +45,69 @@ gh_with_backoff api nope >/dev/null 2>&1
 [ "$(cat "$CALLS")" -eq 1 ] || { echo "FAIL gh_with_backoff should not retry a non-rate-limit error"; fail=1; }
 
 [ "$fail" -eq 0 ] && echo "PASS: gh_with_backoff" || exit 1
+
+# =============================================================================
+# issue_has_open_pr -- regex-matcher regressions (rossoctl/automation#103)
+#
+# The matcher logic lives inside the --jq filter (Layer 2) and the grep -Eq
+# (Layer 3) of issue_has_open_pr. We stub gh so that `gh pr list ... --jq EXPR`
+# runs the REAL jq against canned JSON using the EXACT expression the function
+# passes, and `gh pr diff` emits a canned diff. This exercises the actual regex
+# strings in github-api.sh, not a reimplementation of them.
+# =============================================================================
+fail2=0
+
+# --- Layer 2: issue-number boundary -- #12 must NOT match "fixes #123" ---
+# Shared stub: canned `pr list --json number,body`; GraphQL (Layer 1) returns
+# nothing so control falls through to Layer 2.
+PR_LIST_BODY='[{"number":123,"body":"fixes #123"},{"number":12,"body":"closes #12"}]'
+gh() {
+  case "$1 $2" in
+    "api graphql") printf '' ;;              # Layer 1: no closing PR
+    "pr list")
+      # locate the --jq expression this invocation passed, run real jq on canned JSON
+      local jq_expr=""; shift
+      while [ "$#" -gt 0 ]; do
+        [ "$1" = "--jq" ] && { jq_expr="$2"; break; }
+        shift
+      done
+      printf '%s' "$PR_LIST_BODY" | jq -r "$jq_expr"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# issue 12 is covered (its own PR #12 says "closes #12"); #123 must not leak in.
+out=$(issue_has_open_pr "rossoctl/automation" 12 2>/dev/null); rc=$?
+[ "$rc" -eq 0 ] && [ "$out" = "12" ] \
+  || { echo "FAIL issue_has_open_pr: #12 should match 'closes #12' (got rc=$rc out=[$out])"; fail2=1; }
+
+# issue 1 has no matching close/fix body (neither "#123" nor "#12" is "#1(?![0-9])").
+out=$(issue_has_open_pr "rossoctl/automation" 1 2>/dev/null); rc=$?
+[ "$rc" -ne 0 ] \
+  || { echo "FAIL issue_has_open_pr: #1 must NOT match '#12'/'#123' bodies (prefix bug), got [$out]"; fail2=1; }
+
+# --- Layer 3: broken-URL match -- grep -Eq must honor sed -E escaping ---
+# Only source_file + broken_url trigger Layer 3. Stub returns one candidate PR
+# whose diff removes a query-string URL (contains '?', which sed -E escapes).
+BROKEN_URL='https://example.com/path?a=1&b=2'
+gh() {
+  case "$1 $2" in
+    "api graphql") printf '' ;;      # Layer 1: none
+    "pr list")
+      # Distinguish Layer 2 (--json number,body) from Layer 3 (--json number,files).
+      case " $* " in
+        *" number,files "*) echo 7 ;;   # Layer 3 file-overlap candidate
+        *) printf '' ;;                   # Layer 2: no keyword match
+      esac
+      ;;
+    "pr diff") printf -- '-see %s for details\n' "$BROKEN_URL" ;;
+    *) return 1 ;;
+  esac
+}
+out=$(issue_has_open_pr "rossoctl/automation" 99 "docs/x.md" "$BROKEN_URL" 2>/dev/null); rc=$?
+[ "$rc" -eq 0 ] && [ "$out" = "7" ] \
+  || { echo "FAIL issue_has_open_pr: Layer 3 should match query-string URL via grep -Eq (got rc=$rc out=[$out])"; fail2=1; }
+
+unset -f gh
+[ "$fail2" -eq 0 ] && echo "PASS: issue_has_open_pr regex matchers" || exit 1
