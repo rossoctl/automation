@@ -33,7 +33,7 @@ done
 repoman_config
 
 # --- Configuration ---
-REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-health}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/link-health}"
 
 # Report-PR destination. The org main repo's docs/ folder feeds the docs site
 # (rossoctl.dev) and cannot host machine-generated reports, so the standing

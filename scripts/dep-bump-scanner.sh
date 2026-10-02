@@ -45,7 +45,7 @@ OPTIONS:
 
 ENVIRONMENT:
   REPOS_DIR         (required) Directory containing cloned org repos
-  REPORTS_DIR       (optional) Where to write reports (default: ./reports/dep-bump)
+  REPORTS_DIR       (optional) Where to write reports (default: ~/reports/dep-bump)
 
 PREREQUISITES:
   bash 4+, gh (authenticated), jq
@@ -66,7 +66,7 @@ repoman_config
 # --- Configuration ---
 validate_repos_dir "${REPOS_DIR:-}"
 
-REPORTS_DIR="${REPORTS_DIR:-./reports/dep-bump}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/dep-bump}"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500

@@ -90,10 +90,15 @@ REPORT_TARGET_DIR="${MAIN_REPO_DIR:-$REPOS_DIR/$REPORT_TARGET_OWNER/$REPORT_TARG
 
 # --- Validate inputs ---
 if [ -z "${REPORTS_DIR:-}" ]; then
-  if [ -d "./reports" ]; then
+  # Default to ~/reports -- the parent the scanners/fixers now write their
+  # per-program dirs (and the shared _index.json) under. Fall back to ./reports
+  # for a repo-local layout if ~/reports does not exist yet.
+  if [ -d "$HOME/reports" ]; then
+    REPORTS_DIR="$HOME/reports"
+  elif [ -d "./reports" ]; then
     REPORTS_DIR="./reports"
   else
-    echo "ERROR: REPORTS_DIR is not set and ./reports does not exist."
+    echo "ERROR: REPORTS_DIR is not set and neither ~/reports nor ./reports exists."
     echo "Export it to the directory containing program report subdirs:"
     echo "  export REPORTS_DIR=~/reports"
     exit 1
@@ -387,7 +392,15 @@ fi
 
 # Merge and produce table
 all_repos=$(printf '%s\n%s\n' "$lh_repos" "$db_repos" | sort -u | grep -v '^$' || true)
-TOTAL_UNIQUE_REPOS=$(echo "$all_repos" | grep -c . || echo "0")
+# Count non-empty lines. `grep -c` already prints 0 on no match AND returns 1,
+# so a `|| echo 0` fallback would append a SECOND "0" -- yielding a two-line
+# value that breaks the integer test at the coverage-percent guard below. Guard
+# the empty case explicitly instead of relying on grep's rc.
+if [ -n "$all_repos" ]; then
+  TOTAL_UNIQUE_REPOS=$(printf '%s\n' "$all_repos" | grep -c .)
+else
+  TOTAL_UNIQUE_REPOS=0
+fi
 
 while IFS= read -r repo; do
   [ -z "$repo" ] && continue
