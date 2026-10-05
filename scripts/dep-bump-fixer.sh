@@ -75,10 +75,10 @@ SKILL_FOOTER=$(skill_attribution "dep-bump-fixer")
 # Stable dedup key: the substring every footer form shares, regardless of the
 # per-run SHA (both "...RepoMan dep-bump-fixer@<sha>..." and the blob/main
 # fallback contain it). The dedup search (below) looks for THIS, not the whole
-# footer, so a changing SHA never defeats dedup. Comments carrying the OLD
-# "Rossoctl Dep Bump Fixer" marker are no longer recognized, so an
-# already-analyzed PR may receive one duplicate comment on the next run after
-# the marker changed from its former value — acceptable, one-time.
+# footer, so a changing SHA never defeats dedup. Comments carrying the former
+# marker value are no longer recognized, so an already-analyzed PR may receive
+# one duplicate comment on the next run after the marker changed — acceptable,
+# one-time.
 FIXER_SIGNATURE="RepoMan dep-bump-fixer"
 
 # --- Workspace setup ---

@@ -451,7 +451,7 @@ else
 
       echo ""
       echo "  Body:"
-      echo "    Automated fix by OpenClaw Link Health Fixer."
+      echo "    Automated fix by RepoMan Link Health Fixer."
       echo "    Broken internal links updated to point to current file locations."
       echo ""
       echo "    | File | Old URL | New URL |"
@@ -499,7 +499,7 @@ else
       # Commit
       git commit -s -m "docs: Fix broken internal links in $fix_repo_name
 
-Automated fix by OpenClaw Link Health Fixer ($FIX_DATE)." 2>/dev/null || {
+Automated fix by RepoMan Link Health Fixer ($FIX_DATE)." 2>/dev/null || {
         echo "  No changes to commit"
         continue
       }
@@ -511,7 +511,7 @@ Automated fix by OpenClaw Link Health Fixer ($FIX_DATE)." 2>/dev/null || {
       }
 
       # Create PR
-      pr_body="Automated fix by OpenClaw Link Health Fixer.
+      pr_body="Automated fix by RepoMan Link Health Fixer.
 Broken internal links updated to point to current file locations.
 
 | File | Old Path | New Path |
@@ -649,7 +649,7 @@ while IFS= read -r item; do
 $suggested_replacement
 
 ---
-*Analyzed by OpenClaw Link Health Fixer ($FIX_DATE)*"
+*Analyzed by RepoMan Link Health Fixer ($FIX_DATE)*"
 
   # Post comment
   if gh issue comment "$number" --repo "$repo" --body "$comment_body" 2>/dev/null; then
