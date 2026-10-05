@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/program-lib.sh"
 
 # --- Configuration ---
-REPORTS_DIR="${REPORTS_DIR:-$HOME/workspaces/clawgenti/reports/link-scan}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/link-health}"
 
 # Standing-orders / attribution repo for the PR body's program link.
 # TODO(RepoMan Phase 2): move source_repo to programs/link-health.json.

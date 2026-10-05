@@ -21,7 +21,7 @@
 
 ### Operational Notes
 - Cron job: `link-health-scanner` (Mon/Wed/Fri 6am ET, isolated)
-- Reports: `reports/link-scan/latest.json` and `reports/link-scan/history.json`
+- Reports: `reports/link-health/latest.json` and `reports/link-health/history.json`
 - Report PR: `automation-health/link-health.md` in `rossoctl/automation` (via the
   `link-health/reports` branch, standing fork PR). Single file, overwritten in
   place each run; history lives in git commit history (rossoctl/automation#44).

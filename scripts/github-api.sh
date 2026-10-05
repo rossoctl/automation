@@ -161,7 +161,7 @@ issue_has_open_pr() {
   pr_number=$(gh pr list --repo "$repo" --state open \
     --search "#$issue_number" \
     --json number,body \
-    --jq ".[] | select(.body | test(\"(?i)(close[sd]?|fix(e[sd])?|resolve[sd]?)\\\\s+#$issue_number\")) | .number" \
+    --jq ".[] | select(.body | test(\"(?i)(close[sd]?|fix(e[sd])?|resolve[sd]?)\\\\s+#$issue_number(?![0-9])\")) | .number" \
     2>/dev/null | head -1)
 
   if [ -n "$pr_number" ]; then
@@ -184,7 +184,7 @@ issue_has_open_pr() {
     while IFS= read -r candidate_pr; do
       [ -z "$candidate_pr" ] && continue
       if gh pr diff "$candidate_pr" --repo "$repo" 2>/dev/null \
-        | grep -q "^-.*$escaped_url"; then
+        | grep -Eq "^-.*$escaped_url"; then
         echo "$candidate_pr"
         return 0
       fi

@@ -64,7 +64,7 @@ For each entry in `error_map`, extract:
 
 ## Diffing Against Previous Scan
 
-Read `~/workspaces/clawgenti/reports/link-scan/latest.json` if it exists. Compare current broken links against the previous scan by the tuple (repo, file, url):
+Read `~/reports/link-health/latest.json` if it exists. Compare current broken links against the previous scan by the tuple (repo, file, url):
 
 - **New:** in current scan but not in previous
 - **Fixed:** in previous scan but not in current
@@ -138,7 +138,7 @@ fi
 
 ### latest.json
 
-Overwrite `~/workspaces/clawgenti/reports/link-scan/latest.json`:
+Overwrite `~/reports/link-health/latest.json`:
 
 ```json
 {
@@ -173,7 +173,7 @@ The `scan_id` format is `YYYY-MM-DD-NNN` where NNN is a zero-padded sequence num
 
 ### history.json
 
-Append one row to `~/workspaces/clawgenti/reports/link-scan/history.json`:
+Append one row to `~/reports/link-health/history.json`:
 
 ```json
 {

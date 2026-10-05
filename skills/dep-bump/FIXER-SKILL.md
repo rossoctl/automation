@@ -26,14 +26,14 @@ jq --version
 ### Always dry-run first
 
 ```bash
-REPOS_DIR=~/kagenti REPORTS_DIR=~/workspaces/clawgenti/reports/dep-bump \
+REPOS_DIR=~/kagenti REPORTS_DIR=~/reports/dep-bump \
   bash ~/workspaces/clawgenti/scripts/dep-bump-fixer.sh --dry-run
 ```
 
 ### Live run (posts comments on PRs)
 
 ```bash
-REPOS_DIR=~/kagenti REPORTS_DIR=~/workspaces/clawgenti/reports/dep-bump \
+REPOS_DIR=~/kagenti REPORTS_DIR=~/reports/dep-bump \
   bash ~/workspaces/clawgenti/scripts/dep-bump-fixer.sh --live --issue-limit 3
 ```
 
