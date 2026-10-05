@@ -79,7 +79,7 @@ scp config/org.env config/core-repos.txt kagenti-bot:~/workspaces/clawgenti/conf
 
 ## Runtime
 
-- Reports: `~/workspaces/clawgenti/reports/<program>/` (remote host only) -- one directory per program.
+- Reports: `~/reports/<program>/` (remote host only) -- one directory per program, siblings of the shared `~/reports/_index.json`.
 - Cron jobs managed via OpenClaw gateway (`~/.openclaw/cron/jobs.json`).
 - Bot account: [clawgenti](https://github.com/clawgenti).
 
