@@ -39,17 +39,16 @@ jobs:
         # tests/test-repoman-setup.sh is deliberately NOT listed here because it
         # carries intentional test idioms (SC2088 literal-tilde, SC2034 var read
         # by a sourced function) that are load-bearing for what it asserts.
-        run: shellcheck --severity=warning tests/test-repoman-requirements.sh tests/test-github-api.sh tests/test-repoman-check.sh tests/test-repo-sync.sh tests/test-repoman-index.sh tests/test-automation-health-dashboard.sh tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh tests/test-skill-meta.sh tests/test-pr-review-integration.sh tests/test-pr-review-impact.sh
+        run: shellcheck --severity=warning tests/test-repoman-requirements.sh tests/test-github-api.sh tests/test-repoman-check.sh tests/test-repo-sync.sh tests/test-repoman-index.sh tests/test-automation-health-dashboard.sh tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh tests/test-skill-meta.sh tests/test-pr-review-integration.sh tests/test-pr-review-impact.sh tests/test-weekly-report.sh
       - name: Run test suite
         # NOTE: this list and the shellcheck lists above are EXPLICIT, not globs.
         # A new test file must be added here (and to the relevant shellcheck
         # step) or it silently never runs in CI.
-        # The weekly-report consumer test is still removed pending that script's
-        # RepoMan port (6b step 6); do NOT re-add it until weekly-report.sh is
-        # migrated off the deleted org.sh API. The pr-review consumer tests are
-        # back: their scripts now resolve the enrolled set via repoman_get_repos,
-        # and the integration test stubs it with REPOMAN_REPOS_FILE so it is
-        # hermetic (passes with or without an authenticated gh).
+        # All three previously-deferred consumer tests are back: the pr-review
+        # and weekly-report scripts now resolve the enrolled set via
+        # repoman_get_repos, and each consumer test stubs it with
+        # REPOMAN_REPOS_FILE so the suite is hermetic (passes with or without an
+        # authenticated gh).
         run: |
           set -e
           for t in tests/test-lib-inventory.sh tests/test-lib-modules.sh \
@@ -62,7 +61,8 @@ jobs:
                    tests/test-repoman-index.sh tests/test-automation-health-dashboard.sh \
                    tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh \
                    tests/test-github-api.sh tests/test-skill-meta.sh \
-                   tests/test-pr-review-integration.sh tests/test-pr-review-impact.sh; do
+                   tests/test-pr-review-integration.sh tests/test-pr-review-impact.sh \
+                   tests/test-weekly-report.sh; do
             echo "== $t =="
             bash "$t"
           done
