@@ -68,11 +68,18 @@ REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/dep-bump}"
 SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
-# Marker appended to every fixer comment; also the dedup key (line 278 searches
-# existing comments for it before posting). Changing this string means comments
-# carrying the OLD marker are no longer recognized, so an already-analyzed PR
-# may receive one duplicate comment on the next run — acceptable, one-time.
-FIXER_SIGNATURE="Automated analysis by Rossoctl Dep Bump Fixer"
+# Provenance footer appended to every fixer comment/issue. Resolved once at
+# startup: the helper lazily writes _meta.json beside this skill and returns the
+# pinned-SHA RepoMan attribution (blob/main fallback when unresolved).
+SKILL_FOOTER=$(skill_attribution "dep-bump-fixer")
+# Stable dedup key: the substring every footer form shares, regardless of the
+# per-run SHA (both "...RepoMan dep-bump-fixer@<sha>..." and the blob/main
+# fallback contain it). The dedup search (below) looks for THIS, not the whole
+# footer, so a changing SHA never defeats dedup. Comments carrying the OLD
+# "Rossoctl Dep Bump Fixer" marker are no longer recognized, so an
+# already-analyzed PR may receive one duplicate comment on the next run after
+# the marker changed from its former value — acceptable, one-time.
+FIXER_SIGNATURE="RepoMan dep-bump-fixer"
 
 # --- Workspace setup ---
 setup_workspace "dep-bump-fixer"
@@ -337,7 +344,7 @@ $changelog_summary
 This PR has exceeded the ${sla_days}-day SLA for ${severity}-severity patches. Please review and merge, or document a deferral reason.
 
 ---
-_${FIXER_SIGNATURE} (scan $SCAN_ID)_"
+_${SKILL_FOOTER} (scan $SCAN_ID)_"
       ;;
 
     major)
@@ -357,7 +364,7 @@ Major version bumps require manual review. Consider:
 - Deferring with documented justification if migration is non-trivial
 
 ---
-_${FIXER_SIGNATURE} (scan $SCAN_ID)_"
+_${SKILL_FOOTER} (scan $SCAN_ID)_"
       ;;
 
     *)
@@ -391,7 +398,7 @@ $changelog_summary
 - Recommendation: $recommendation
 
 ---
-_${FIXER_SIGNATURE} (scan $SCAN_ID)_"
+_${SKILL_FOOTER} (scan $SCAN_ID)_"
       ;;
   esac
 
@@ -412,7 +419,7 @@ _${FIXER_SIGNATURE} (scan $SCAN_ID)_"
       gh_with_backoff issue comment "$issue_number" --repo "$issue_repo" \
         --body "Analysis posted on PR #$pr_number. Awaiting human action.
 
-_${FIXER_SIGNATURE} (scan $SCAN_ID)_" 2>/dev/null || true
+_${SKILL_FOOTER} (scan $SCAN_ID)_" 2>/dev/null || true
     else
       echo "    WARN: Failed to post comment on PR #$pr_number"
     fi
@@ -494,7 +501,7 @@ if [ -f "$REPORTS_DIR/latest.json" ]; then
 Ecosystems: $gap_ecosystems
 
 ---
-_${FIXER_SIGNATURE} (scan $SCAN_ID)_"; then
+_${SKILL_FOOTER} (scan $SCAN_ID)_"; then
                 echo "yes"
               else
                 echo "no"

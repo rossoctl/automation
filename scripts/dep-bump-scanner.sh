@@ -72,6 +72,11 @@ SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
 ESCALATION_THRESHOLD=5
 
+# Provenance footer for the issue bodies this scanner creates. Resolved once at
+# startup: the helper lazily writes _meta.json beside this skill and returns the
+# pinned-SHA RepoMan attribution (blob/main fallback when the SHA is unresolved).
+SKILL_FOOTER=$(skill_attribution "dep-bump-scanner")
+
 # SLA thresholds (days)
 SLA_CRITICAL=3
 SLA_HIGH=7
@@ -477,7 +482,9 @@ Dependabot PRs should be reviewed and merged within the SLA window.
 ## Additional Context
 
 Category: $category
-Detected by: OpenClaw Dep Bump Scanner (scan $SCAN_ID)"
+
+---
+$SKILL_FOOTER (scan $SCAN_ID)"
 
   if [ "$DRY_RUN" = true ]; then
     echo "  [DRY RUN] Would create issue: $issue_title"
