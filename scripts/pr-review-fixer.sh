@@ -45,7 +45,7 @@ COMMANDS:
   finalize    Check reviews API, move reviewed PRs to reviewed state
 
 OPTIONS:
-  --reports-dir DIR   Reports directory (default: $REPORTS_DIR or ./reports/pr-review)
+  --reports-dir DIR   Reports directory (default: $REPORTS_DIR or ~/reports/pr-review)
   --verbose           Print diagnostic output to stderr
   --dry-run           Preview only, do not write state (DEFAULT)
   --live              Write state transitions for real
@@ -72,7 +72,7 @@ fi
 # --- Setup ---
 setup_workspace "pr-review-fixer"
 TMPDIR="$PROGRAM_TMPDIR"
-REPORTS_DIR="${REPORTS_DIR:-./reports/pr-review}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/pr-review}"
 
 STATE_FILE="$REPORTS_DIR/state.json"
 LATEST_FILE="$REPORTS_DIR/latest.json"
