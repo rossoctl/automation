@@ -10,8 +10,12 @@ trap 'rm -rf "$TEST_TMPDIR"' EXIT
 SKILL="link-health-scanner"
 FAKE_SHA="85449beabc1234567890abcdef1234567890abcd"
 
+# The meta file is keyed per skill name so skills sharing a dir never collide.
+META="_meta.$SKILL.json"
+
 # =============================================================================
-# Branch 1: gh succeeds -> _meta.json is written and the @<sha> footer emitted.
+# Branch 1: gh succeeds -> the per-skill meta file is written and the @<sha>
+# footer emitted.
 # =============================================================================
 dir1="$TEST_TMPDIR/case1"
 mkdir -p "$dir1"
@@ -24,15 +28,15 @@ gh() {
 sha=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir1" "$SKILL")
 [ "$sha" = "$FAKE_SHA" ] \
   || { echo "FAIL branch1: resolve_skill_meta should echo resolved SHA, got [$sha]"; fail=1; }
-[ -f "$dir1/_meta.json" ] \
-  || { echo "FAIL branch1: _meta.json should be written on success"; fail=1; }
-if [ -f "$dir1/_meta.json" ]; then
-  v=$(jq -r '.version' "$dir1/_meta.json")
-  s=$(jq -r '.source' "$dir1/_meta.json")
-  [ "$v" = "$FAKE_SHA" ] || { echo "FAIL branch1: _meta.json .version wrong: [$v]"; fail=1; }
-  [ "$s" = "rossoctl/agent-skills" ] || { echo "FAIL branch1: _meta.json .source wrong: [$s]"; fail=1; }
-  jq -e 'has("installed_at")' "$dir1/_meta.json" >/dev/null \
-    || { echo "FAIL branch1: _meta.json missing installed_at"; fail=1; }
+[ -f "$dir1/$META" ] \
+  || { echo "FAIL branch1: $META should be written on success"; fail=1; }
+if [ -f "$dir1/$META" ]; then
+  v=$(jq -r '.version' "$dir1/$META")
+  s=$(jq -r '.source' "$dir1/$META")
+  [ "$v" = "$FAKE_SHA" ] || { echo "FAIL branch1: $META .version wrong: [$v]"; fail=1; }
+  [ "$s" = "rossoctl/agent-skills" ] || { echo "FAIL branch1: $META .source wrong: [$s]"; fail=1; }
+  jq -e 'has("installed_at")' "$dir1/$META" >/dev/null \
+    || { echo "FAIL branch1: $META missing installed_at"; fail=1; }
 fi
 # skill_attribution emits the pinned-SHA footer with the blob/<sha> link.
 foot=$(SCRIPT_DIR="$dir1" SKILL_SOURCE_REPO="rossoctl/agent-skills" skill_attribution "$SKILL")
@@ -51,8 +55,8 @@ gh() { echo "HTTP 403: rate limit exceeded" >&2; return 1; }
 sha=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir2" "$SKILL" 2>/dev/null)
 [ -z "$sha" ] \
   || { echo "FAIL branch2: resolve_skill_meta should echo empty on gh failure, got [$sha]"; fail=1; }
-[ ! -f "$dir2/_meta.json" ] \
-  || { echo "FAIL branch2: _meta.json must NOT be written on failure (self-heal retry)"; fail=1; }
+[ ! -f "$dir2/$META" ] \
+  || { echo "FAIL branch2: $META must NOT be written on failure (self-heal retry)"; fail=1; }
 foot=$(SCRIPT_DIR="$dir2" SKILL_SOURCE_REPO="rossoctl/agent-skills" skill_attribution "$SKILL" 2>/dev/null)
 case "$foot" in
   *"blob/main/skills/$SKILL/SKILL.md"*) ;;
@@ -63,13 +67,13 @@ case "$foot" in
 esac
 
 # =============================================================================
-# Branch 3: pre-existing _meta.json is read, never overwritten, no gh call.
+# Branch 3: pre-existing meta file is read, never overwritten, no gh call.
 # =============================================================================
 dir3="$TEST_TMPDIR/case3"
 mkdir -p "$dir3"
 PINNED="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 printf '{"version":"%s","source":"rossoctl/agent-skills","installed_at":"2026-01-01"}\n' \
-  "$PINNED" > "$dir3/_meta.json"
+  "$PINNED" > "$dir3/$META"
 GH_CALLED="$TEST_TMPDIR/gh_called"; : > "$GH_CALLED"
 gh() { echo called >> "$GH_CALLED"; printf '%s\n' "$FAKE_SHA"; }
 
@@ -77,10 +81,40 @@ sha=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir3" "$SKI
 [ "$sha" = "$PINNED" ] \
   || { echo "FAIL branch3: should echo the pre-existing pinned SHA, got [$sha]"; fail=1; }
 [ ! -s "$GH_CALLED" ] \
-  || { echo "FAIL branch3: gh must NOT be called when _meta.json exists"; fail=1; }
-v=$(jq -r '.version' "$dir3/_meta.json")
+  || { echo "FAIL branch3: gh must NOT be called when $META exists"; fail=1; }
+v=$(jq -r '.version' "$dir3/$META")
 [ "$v" = "$PINNED" ] \
-  || { echo "FAIL branch3: existing _meta.json must not be overwritten, got [$v]"; fail=1; }
+  || { echo "FAIL branch3: existing $META must not be overwritten, got [$v]"; fail=1; }
+
+# =============================================================================
+# Branch 4: two skills sharing ONE dir (the flat scripts/ layout) must get
+# INDEPENDENT pinned SHAs -- the per-skill meta key is what prevents the first
+# skill's SHA from being stamped on the second (the #105 collision bug).
+# =============================================================================
+dir4="$TEST_TMPDIR/case4"
+mkdir -p "$dir4"
+SKILL_A="link-health-scanner"; SHA_A="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SKILL_B="dep-bump-scanner";     SHA_B="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+# Return a per-skill SHA based on the requested path (…?path=skills/<name>).
+gh() {
+  case "$*" in
+    *"skills/$SKILL_A"*) printf '%s\n' "$SHA_A" ;;
+    *"skills/$SKILL_B"*) printf '%s\n' "$SHA_B" ;;
+    *) return 1 ;;
+  esac
+}
+sha_a=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir4" "$SKILL_A")
+sha_b=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir4" "$SKILL_B")
+[ "$sha_a" = "$SHA_A" ] \
+  || { echo "FAIL branch4: skill A should pin its own SHA, got [$sha_a]"; fail=1; }
+[ "$sha_b" = "$SHA_B" ] \
+  || { echo "FAIL branch4: skill B got A's SHA (collision), got [$sha_b] want [$SHA_B]"; fail=1; }
+# Each skill's footer links its OWN sha, not the other's.
+foot_b=$(SCRIPT_DIR="$dir4" SKILL_SOURCE_REPO="rossoctl/agent-skills" skill_attribution "$SKILL_B")
+case "$foot_b" in
+  *"$SKILL_B@${SHA_B:0:7}"*"blob/$SHA_B/skills/$SKILL_B/SKILL.md"*) ;;
+  *) echo "FAIL branch4: skill B footer carries wrong sha/link: [$foot_b]"; fail=1 ;;
+esac
 
 unset -f gh
 [ "$fail" -eq 0 ] && echo "PASS: skill-meta provenance+attribution" || exit 1

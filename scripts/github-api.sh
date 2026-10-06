@@ -203,13 +203,19 @@ issue_has_open_pr() {
 # this library copy.
 SKILL_SOURCE_REPO="${SKILL_SOURCE_REPO:-rossoctl/agent-skills}"
 
-# Resolve a skill's pinned commit SHA, writing _meta.json beside the skill on
-# first success (create-only, self-healing).
+# Resolve a skill's pinned commit SHA, writing a per-skill _meta file beside the
+# skill on first success (create-only, self-healing).
 #
-# On entry, if <skill-dir>/_meta.json already exists it is read and its
+# The meta file is keyed PER SKILL NAME (_meta.<skill-name>.json), not per
+# directory: in the flat scripts/ layout every program shares one SCRIPT_DIR, so
+# a directory-only key would let whichever skill runs first pin ITS sha for all
+# of them, and create-only means the wrong sha would never self-correct. Keying
+# by name keeps each skill's pinned sha independent in any layout.
+#
+# On entry, if that per-skill meta file already exists it is read and its
 # .version echoed -- no network call. Otherwise the SHA is resolved from the
 # canonical source repo's commit history for that skill's path. On success the
-# _meta.json is written and the SHA echoed; on failure (offline, unauthorized,
+# meta file is written and the SHA echoed; on failure (offline, unauthorized,
 # rate limited) NOTHING is written -- the function warns to stderr and echoes
 # empty, so the caller falls back to the blob/main attribution and the next run
 # retries. It must never write a sentinel such as {"version":"unknown"}: a
@@ -217,14 +223,14 @@ SKILL_SOURCE_REPO="${SKILL_SOURCE_REPO:-rossoctl/agent-skills}"
 #
 # Usage: sha=$(resolve_skill_meta "$SCRIPT_DIR" "link-health-scanner")
 # Args:
-#   $1 - skill directory (where _meta.json lives / will be written)
+#   $1 - skill directory (where the meta file lives / will be written)
 #   $2 - skill name (its path segment under skills/ in the source repo)
 # Prints: the resolved commit SHA, or empty string on failure.
 # Returns: 0 always (provenance resolution never affects the scan/fix rc).
 resolve_skill_meta() {
   local skill_dir="$1"
   local skill_name="$2"
-  local meta_file="$skill_dir/_meta.json"
+  local meta_file="$skill_dir/_meta.$skill_name.json"
   local sha=""
 
   # Create-only: an existing _meta.json is authoritative, never overwritten.

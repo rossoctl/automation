@@ -83,10 +83,13 @@ together as one phase (expected to land as two coordinated PRs):
   (`~/skills/<name>/`) and OpenClaw (`~/agent-skills/skills/<name>/`).
 - Provenance resolution never affects the scan/fix exit code.
 
-### Shared helpers in `program-lib.sh`
+### Shared helpers in `github-api.sh`
 
-Two functions, so all four live entry points share one implementation and the
-agent-skills copy syncs byte-identically under the dashboard parity contract:
+Two functions, implemented in `github-api.sh` (which `program-lib.sh` sources,
+so every entry point that sources `program-lib.sh` picks them up). They live
+alongside the other GitHub-API helpers, are tracked by the
+`test-lib-inventory.sh` function-surface guard, and the agent-skills copy syncs
+byte-identically under the dashboard parity contract:
 
 - `resolve_skill_meta <skill-dir> <skill-name>` — the create-only lazy writer
   above; echoes the resolved SHA, or empty on failure.
