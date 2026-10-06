@@ -233,8 +233,8 @@ resolve_skill_meta() {
   local meta_file="$skill_dir/_meta.$skill_name.json"
   local sha=""
 
-  # Create-only: an existing _meta.json is authoritative, never overwritten.
-  # Refreshing on skill update is the deploy layer's job.
+  # Create-only: an existing _meta.<skill>.json is authoritative, never
+  # overwritten. Refreshing on skill update is the deploy layer's job.
   if [ -f "$meta_file" ]; then
     sha=$(jq -r '.version // empty' "$meta_file" 2>/dev/null)
     printf '%s' "$sha"
@@ -242,7 +242,7 @@ resolve_skill_meta() {
   fi
 
   # Resolve the pinned SHA from the canonical source repo's history for this
-  # skill's path. Failure here is non-fatal and leaves _meta.json absent.
+  # skill's path. Failure here is non-fatal and leaves the meta file absent.
   sha=$(gh api \
     "repos/$SKILL_SOURCE_REPO/commits?path=skills/$skill_name&per_page=1" \
     --jq '.[0].sha' 2>/dev/null)
