@@ -253,7 +253,7 @@ resolve_skill_meta() {
     return 0
   fi
 
-  # Write _meta.json atomically beside the skill.
+  # Write the per-skill _meta.<skill>.json atomically beside the skill.
   local installed_at
   installed_at=$(date -u +"%Y-%m-%d")
   local tmp="$meta_file.tmp.$$"

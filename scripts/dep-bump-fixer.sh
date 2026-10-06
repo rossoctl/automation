@@ -69,7 +69,7 @@ SCAN_DATE=$(date -u +"%Y-%m-%d")
 SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 MAX_HISTORY_ROWS=500
 # Provenance footer appended to every fixer comment/issue. Resolved once at
-# startup: the helper lazily writes _meta.json beside this skill and returns the
+# startup: the helper lazily writes _meta.<skill>.json beside this skill and returns the
 # pinned-SHA RepoMan attribution (blob/main fallback when unresolved).
 SKILL_FOOTER=$(skill_attribution "dep-bump-fixer")
 # Stable dedup key: the substring every footer form shares, regardless of the
