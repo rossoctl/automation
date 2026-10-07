@@ -191,9 +191,12 @@ owners. This is a Python change in agent-skills, its own PR, landing alongside
 ### 6b tests
 
 - Re-add to `.github/workflows/tests.yml` (run list and shellcheck group):
-  `tests/test-pr-review-integration.sh`, `tests/test-pr-review-impact.sh`
-  (updated to exercise the **real** script, not its inline jq reimplementation),
-  and `tests/test-weekly-report.sh`.
+  `tests/test-pr-review-integration.sh`, `tests/test-pr-review-impact.sh`,
+  and `tests/test-weekly-report.sh`. `test-pr-review-impact.sh` keeps its
+  inline reimplementation of the `median_ttm`/`mk` classifier (a self-contained
+  oracle, flagged in the file as drift-prone) rather than sourcing the real
+  script; converting it to exercise `pr-review-impact.sh` directly is deferred
+  with the rest of the pr-review hardening #86 tracks.
 - **New dashboard cross-program-join guard** (owed by #86): make the dashboard's
   link-health ↔ dep-bump join logic sourceable, add the dashboard to the CI test
   list, and assert that two same-name repos under different owners
@@ -204,8 +207,9 @@ owners. This is a Python change in agent-skills, its own PR, landing alongside
 
 ## Cross-repo and parity
 
-- `program-lib.sh` (the 6a helpers) is in the byte-identical dashboard parity
-  set, so the agent-skills copy syncs in the same PR cycle.
+- `github-api.sh` (which carries the 6a helpers `resolve_skill_meta` and
+  `skill_attribution`, sourced via `program-lib.sh`) is in the byte-identical
+  dashboard parity set, so the agent-skills copy syncs in the same PR cycle.
 - The attribution target repo is **`rossoctl/agent-skills`** (the canonical
   skill source), not `rossoctl/automation`.
 - agent-skills PRs for this phase: the `program-lib.sh` parity sync (6a) and the
