@@ -233,12 +233,20 @@ resolve_skill_meta() {
   local meta_file="$skill_dir/_meta.$skill_name.json"
   local sha=""
 
-  # Create-only: an existing _meta.<skill>.json is authoritative, never
-  # overwritten. Refreshing on skill update is the deploy layer's job.
+  # Create-only: an existing _meta.<skill>.json with a valid .version is
+  # authoritative, never overwritten (refreshing on skill update is the deploy
+  # layer's job). But a present-yet-corrupt file (truncated write, hand-edit,
+  # not JSON) yields no .version -- treating that as authoritative would pin the
+  # skill to the blob/main fallback forever with no self-heal. So we only short-
+  # circuit on a readable version; a corrupt file falls through to re-resolution,
+  # which overwrites it on success, honoring the spec's self-heal invariant.
   if [ -f "$meta_file" ]; then
     sha=$(jq -r '.version // empty' "$meta_file" 2>/dev/null)
-    printf '%s' "$sha"
-    return 0
+    if [ -n "$sha" ]; then
+      printf '%s' "$sha"
+      return 0
+    fi
+    echo "WARN: $meta_file exists but carries no usable .version (corrupt?); re-resolving provenance." >&2
   fi
 
   # Resolve the pinned SHA from the canonical source repo's history for this

@@ -116,5 +116,30 @@ case "$foot_b" in
   *) echo "FAIL branch4: skill B footer carries wrong sha/link: [$foot_b]"; fail=1 ;;
 esac
 
+# =============================================================================
+# Branch 5: a present-but-CORRUPT meta file must NOT pin the skill forever. It
+# carries no usable .version, so resolve_skill_meta falls through to re-resolve
+# and (on gh success) overwrites it -- self-healing, per the spec invariant.
+# =============================================================================
+dir5="$TEST_TMPDIR/case5"
+mkdir -p "$dir5"
+HEAL_SHA="cccccccccccccccccccccccccccccccccccccccc"
+# Write a corrupt meta file: not valid JSON, so jq '.version' yields nothing.
+printf 'this is not json {{{\n' > "$dir5/$META"
+gh() { printf '%s\n' "$HEAL_SHA"; }
+
+sha=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir5" "$SKILL" 2>/dev/null)
+[ "$sha" = "$HEAL_SHA" ] \
+  || { echo "FAIL branch5: corrupt meta should re-resolve, got [$sha] want [$HEAL_SHA]"; fail=1; }
+# The corrupt file is overwritten with the freshly resolved version.
+v=$(jq -r '.version // empty' "$dir5/$META" 2>/dev/null)
+[ "$v" = "$HEAL_SHA" ] \
+  || { echo "FAIL branch5: corrupt meta not self-healed, .version=[$v]"; fail=1; }
+# Second run reads the healed file -- no gh call needed.
+gh() { echo "FAIL branch5: gh must NOT be called after self-heal" >&2; return 1; }
+sha2=$(SKILL_SOURCE_REPO="rossoctl/agent-skills" resolve_skill_meta "$dir5" "$SKILL" 2>/dev/null)
+[ "$sha2" = "$HEAL_SHA" ] \
+  || { echo "FAIL branch5: healed meta should be read back, got [$sha2]"; fail=1; }
+
 unset -f gh
 [ "$fail" -eq 0 ] && echo "PASS: skill-meta provenance+attribution" || exit 1
