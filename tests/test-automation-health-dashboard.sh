@@ -105,7 +105,7 @@ printf '%s' "$out" | grep -qF '| alice/cortex |' \
 printf '%s' "$out" | grep -qE '^\| cortex \|' \
   && { echo "FAIL c7: owners collapsed into a bare 'cortex' row"; fail=1; }
 # Exactly two coverage rows carry the "cortex" name, one per owner.
-cortex_rows=$(printf '%s' "$out" | grep -cE '^\| [a-z]+/cortex \|' || true)
+cortex_rows=$(printf '%s' "$out" | grep -cE '^\| [A-Za-z0-9._-]+/cortex \|' || true)
 [ "$cortex_rows" -eq 2 ] \
   || { echo "FAIL c7: expected 2 distinct cortex rows, got $cortex_rows"; fail=1; }
 
