@@ -77,4 +77,36 @@ out=$(run_dash --index "$IDX" 2>&1); rc=$?
 [ "$rc" -ne 0 ] || { echo "FAIL c6: expected non-zero"; fail=1; }
 printf '%s' "$out" | grep -q "$IDX" || { echo "FAIL c6: error did not name index"; fail=1; }
 
+# Case 7: cross-program coverage join keys on the full owner/name ref, so two
+# different owners of the same bare repo name stay DISTINCT rows and never
+# collapse into one bucket. Under the RepoMan owner model the enrolled set can
+# span owners, so "cortex" alone is ambiguous; the join must treat
+# rossoctl/cortex and alice/cortex as separate repos. link-health reports a
+# broken link in rossoctl/cortex; dep-bump reports a stale PR in alice/cortex.
+rm -f "$IDX"
+cat > "$REPORTS/link-health/latest.json" <<'EOF'
+{"date":"2026-10-05","repos_scanned":1,"total_links_checked":1,
+ "broken":[{"repo":"rossoctl/cortex","file":"docs/x.md","url":"https://e","status":"404","category":"external"}]}
+EOF
+cat > "$REPORTS/dep-bump/latest.json" <<'EOF'
+{"date":"2026-10-05","repos_scanned":1,"repos_with_dependabot":1,"total_open_prs":1,
+ "stale_prs":[{"repo":"alice/cortex","number":7,"category":"minor","is_stale":true}],
+ "coverage_gaps":[]}
+EOF
+out=$(run_dash 2>&1); rc=$?
+[ "$rc" -eq 0 ] || { echo "FAIL c7: exit $rc: $out"; fail=1; }
+# Both owner-qualified rows must appear as distinct table rows ("| <repo> |").
+printf '%s' "$out" | grep -qF '| rossoctl/cortex |' \
+  || { echo "FAIL c7: rossoctl/cortex row missing"; fail=1; }
+printf '%s' "$out" | grep -qF '| alice/cortex |' \
+  || { echo "FAIL c7: alice/cortex row missing"; fail=1; }
+# And they must NOT collapse into a single bare "cortex" bucket: a row whose
+# repo cell is exactly "cortex" (owner stripped) is the regression we guard.
+printf '%s' "$out" | grep -qE '^\| cortex \|' \
+  && { echo "FAIL c7: owners collapsed into a bare 'cortex' row"; fail=1; }
+# Exactly two coverage rows carry the "cortex" name, one per owner.
+cortex_rows=$(printf '%s' "$out" | grep -cE '^\| [A-Za-z0-9._-]+/cortex \|' || true)
+[ "$cortex_rows" -eq 2 ] \
+  || { echo "FAIL c7: expected 2 distinct cortex rows, got $cortex_rows"; fail=1; }
+
 [ "$fail" -eq 0 ] && echo "PASS" || { echo "FAILURES"; exit 1; }

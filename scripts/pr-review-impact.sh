@@ -26,19 +26,19 @@ LOOKBACK_LIMIT=200
 
 # get_repos -- emit the repos to measure, one "owner/name" per line.
 #
-# Delegates to get_core_repos() (program-lib.sh), which reads the shared
-# allowlist at config/core-repos.txt, so PR-review coverage is defined in one
+# Delegates to repoman_get_repos() (program-lib.sh), which reads the RepoMan
+# enrolled set at ~/.repoman/repos.json, so PR-review coverage is defined in one
 # place shared with the scanner rather than hardcoded here.
 # FUTURE SEAM (rossoctl/rossoctl#1811 repository-tiers): once the org-level
-# `tier` Custom Property is stamped, the allowlist file can be replaced with the
+# `tier` Custom Property is stamped, the enrolled set can be replaced with the
 # Core-tier query below. The property is currently unstamped (returns empty) and
-# the token lacks the required scope, so the allowlist stays until #1811 lands:
+# the token lacks the required scope, so the enrolled set stays until #1811 lands:
 #
 #   gh_with_backoff api "orgs/rossoctl/properties/values" \
 #     --jq '.[] | select(.properties[]? | .property_name=="tier" and .value=="core") | .repository_full_name'
 #
 get_repos() {
-  get_core_repos
+  repoman_get_repos
 }
 
 # --- CLI args ---
@@ -51,8 +51,6 @@ while [[ $# -gt 0 ]]; do
     --verbose) VERBOSE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
@@ -74,10 +72,8 @@ Usage:
 Options:
   --verbose           Print diagnostics to stderr
   --dry-run           Compute and print impact.json to stdout; do not write
-  --reports-dir DIR   Where to write impact.json (default: ./reports/pr-review,
+  --reports-dir DIR   Where to write impact.json (default: ~/reports/pr-review,
                       or $REPORTS_DIR if set in the environment)
-  --profile NAME      Org profile to load (config/org.<name>.env; default org.env)
-  --org NAME          GitHub org (default: from profile, config/org.env)
   --help, -h          Show this help
 
 NOTES:
@@ -94,14 +90,10 @@ USAGE
   exit 0
 fi
 
-# Resolve org identity (env > profile > default) before reading the allowlist;
-# get_core_repos() prepends $ORG and fails loud if it is unset.
-load_org_profile
-
 # --- Workspace and reports setup ---
 setup_workspace "pr-review-impact"
 WORK_DIR="$PROGRAM_TMPDIR"
-REPORTS_DIR="${REPORTS_DIR:-./reports/pr-review}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/pr-review}"
 mkdir -p "$REPORTS_DIR"
 
 SCAN_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -111,16 +103,17 @@ ACTIVATIONS_FILE="$WORK_DIR/activations.jsonl"  # one {repo, activation} per rep
 : > "$ALL_FILE"
 : > "$ACTIVATIONS_FILE"
 
-# Resolve the repo set once, up front, so a broken or empty allowlist fails loud
-# rather than producing a zero-repo report with exit 0. Portable while-read build
-# (mapfile is bash 4+, unavailable on macOS's bash 3.2), mirroring pr-review-scanner.
+# Resolve the repo set once, up front, so a broken or empty enrolled set fails
+# loud rather than producing a zero-repo report with exit 0. Portable while-read
+# build (mapfile is bash 4+, unavailable on macOS's bash 3.2), mirroring
+# pr-review-scanner.
 REPOS=()
 while IFS= read -r repo_line; do
   [ -n "$repo_line" ] && REPOS+=("$repo_line")
 done < <(get_repos)
 
 if [ "${#REPOS[@]}" -eq 0 ]; then
-  echo "ERROR: core repos allowlist is empty or could not be loaded" >&2
+  echo "ERROR: RepoMan enrolled set is empty or could not be loaded" >&2
   exit 1
 fi
 

@@ -38,6 +38,16 @@ trap 'rm -rf "$TMPDIR"' EXIT
 REPORTS_DIR="$TMPDIR/reports"
 mkdir -p "$REPORTS_DIR"
 
+# The scanner resolves its repo set from the RepoMan enrolled set
+# (~/.repoman/repos.json) via repoman_get_repos. Point it at a stub so the test
+# is hermetic -- it must not depend on the operator's real enrollment, and it
+# must run in CI where no ~/.repoman exists. $TEST_REPO is the single enrolled
+# repo so the scanner has exactly one place to look.
+export REPOMAN_REPOS_FILE="$TMPDIR/repos.json"
+jq -n --arg full "$TEST_REPO" \
+  '[{owner: ($full | split("/")[0]), name: ($full | split("/")[1])}]' \
+  > "$REPOMAN_REPOS_FILE"
+
 PASS=0
 FAIL=0
 

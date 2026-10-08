@@ -21,15 +21,13 @@ while [[ $# -gt 0 ]]; do
     --verbose) VERBOSE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --reports-dir) REPORTS_DIR="$2"; shift 2 ;;
-    --profile) PROFILE_FLAG="$2"; shift 2 ;;
-    --org) ORG_FLAG="$2"; shift 2 ;;
     --help|-h) SHOW_HELP=true; shift ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-# Short-circuit --help before loading a profile or reading the allowlist, so
-# usage works even in a checkout with a missing/malformed org profile.
+# Short-circuit --help before resolving the enrolled repo set, so usage works
+# even in a checkout with a missing/malformed ~/.repoman/repos.json.
 if [ "$SHOW_HELP" = true ]; then
   cat << 'USAGE'
 pr-review-scanner -- Discover PRs needing AI review
@@ -40,9 +38,7 @@ USAGE:
 OPTIONS:
   --verbose           Print diagnostic output to stderr
   --dry-run           Query GitHub but do not write reports (stdout output still produced)
-  --reports-dir DIR   Where to write reports (default: $REPORTS_DIR or ./reports/pr-review)
-  --profile NAME      Org profile to load (config/org.<name>.env; default org.env)
-  --org NAME          GitHub org (default: from profile, config/org.env)
+  --reports-dir DIR   Where to write reports (default: $REPORTS_DIR or ~/reports/pr-review)
   --help, -h          Show this help
 
 OUTPUT:
@@ -60,24 +56,24 @@ USAGE
   exit 0
 fi
 
-# Resolve org identity (env > profile > default) before reading the allowlist;
-# get_core_repos() prepends $ORG and fails loud if it is unset.
-load_org_profile
+# Resolve the enrolled repo set from ~/.repoman/repos.json (owner/name tuples).
+# repoman_config is not needed here -- the scanner queries GitHub directly and
+# writes no fork, so it needs no REPOS_DIR/FORK_OWNER.
 
 # --- Configuration ---
 BOT_USER="clawgenti"
 
-# Repo coverage comes from the shared allowlist (config/core-repos.txt) via
-# get_core_repos(). Build the array with a portable while-read loop (mapfile is
-# bash 4+, unavailable on macOS's bash 3.2). Fail loud rather than silently
-# scanning an empty set.
+# Repo coverage comes from the RepoMan enrolled set (~/.repoman/repos.json) via
+# repoman_get_repos, which emits "owner/name" per line. Build the array with a
+# portable while-read loop (mapfile is bash 4+, unavailable on macOS's bash
+# 3.2). Fail loud rather than silently scanning an empty set.
 REPOS=()
 while IFS= read -r repo_line; do
   [ -n "$repo_line" ] && REPOS+=("$repo_line")
-done < <(get_core_repos)
+done < <(repoman_get_repos)
 
 if [ "${#REPOS[@]}" -eq 0 ]; then
-  echo "ERROR: core repos allowlist is empty or could not be loaded" >&2
+  echo "ERROR: RepoMan enrolled set is empty or could not be loaded" >&2
   exit 1
 fi
 
@@ -90,7 +86,7 @@ MAX_HISTORY_ROWS=500
 # --- Workspace and reports setup ---
 setup_workspace "pr-review-scanner"
 TMPDIR="$PROGRAM_TMPDIR"
-REPORTS_DIR="${REPORTS_DIR:-./reports/pr-review}"
+REPORTS_DIR="${REPORTS_DIR:-$HOME/reports/pr-review}"
 mkdir -p "$REPORTS_DIR"
 
 SCAN_DATE=$(date -u +%Y-%m-%d)
