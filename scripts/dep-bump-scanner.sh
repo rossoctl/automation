@@ -48,7 +48,7 @@ ENVIRONMENT:
   REPORTS_DIR       (optional) Where to write reports (default: ~/reports/dep-bump)
 
 PREREQUISITES:
-  bash 4+, gh (authenticated), jq
+  bash 3.2+, gh (authenticated), jq
 
 SEVERITY SLAs:
   Critical (CVSS 9.0+)   3 days

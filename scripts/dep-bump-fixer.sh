@@ -53,7 +53,7 @@ ENVIRONMENT:
   REPORTS_DIR       (optional) Where to write reports (default: ~/reports/dep-bump)
 
 PREREQUISITES:
-  bash 4+, gh (authenticated), jq
+  bash 3.2+, gh (authenticated), jq
 USAGE
   exit 0
 fi

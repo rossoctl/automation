@@ -5,13 +5,23 @@ Version-controlled home for rossoctl org automation programs (scanner/fixer patt
 ## Structure
 
 ```
-scripts/           Program scripts (scanner + fixer per program)
-config/            Shared configuration (e.g. core-repos.txt allowlist)
-skills/            OpenClaw SKILL.md files per program
+scripts/           Program scripts (scanner + fixer per program) + the RepoMan engine
 standing-orders/   Standing order definitions per program
+automation-health/ Automation-health dashboard assets
+snapshot/          Host snapshot/restore toolkit
 docs/              Program authoring + self-hosting guides
+tests/             Shell test suite (run in CI)
+tools/             Local-only dev tooling (gitignored dogfood, etc.)
 reports/           (gitignored) Runtime data stays on remote host only
 ```
+
+> **Repo vs. deployment.** This repo tracks the RepoMan `~/.repoman/` model: the enrolled
+> repo set lives in `repos.json` (not a committed `config/core-repos.txt` allowlist), and
+> programs run through `repoman-run.sh`. The live production deployment has **not** been
+> migrated yet — it still runs the earlier config-era setup (`config/core-repos.txt` +
+> `config/org.env`, consumed via `get_core_repos()`), which is why the Org profile and
+> Deploy sections below describe that model. Tracking the migration:
+> [#119](https://github.com/rossoctl/automation/issues/119).
 
 ## Programs
 
@@ -42,7 +52,7 @@ bash scripts/repoman-run.sh <program> --dry-run
 
 `<program>` is one of `link-health`, `dep-bump`, `pr-review`, `weekly-report`, `automation-health`, `repo-sync` (the full set is whatever `repoman-run.sh --help` lists). The orchestrator resolves the repo set, runs the capability check and clone refresh the program needs, execs it, and writes its `_index.json` entry — it is the **sole writer of `_index.json`**, so a program run directly (the commands in the table above) no longer updates the registry the dashboard reads. `repoman run <program>` is the blessed path for an indexed run.
 
-There is no `repoman` executable in this repo yet; `repoman run <program>` maps to `bash scripts/repoman-run.sh <program>`. In a RepoMan deployment the `/repoman` skill (in `rossoctl/agent-skills`) performs that mapping from a Claude Code / OpenClaw agent; scheduled DAM/OpenClaw jobs invoke the same command string. Standing-orders that still call scanners directly are tracked for migration in [#118](https://github.com/rossoctl/automation/issues/118). See the run-path design in `docs/specs/` and the epic [#72](https://github.com/rossoctl/automation/issues/72).
+There is no `repoman` executable in this repo yet; `repoman run <program>` maps to `bash scripts/repoman-run.sh <program>`. In a RepoMan deployment the `/repoman` skill (in `rossoctl/agent-skills`) performs that mapping from a Claude Code / OpenClaw agent; scheduled DAM/OpenClaw jobs invoke the same command string. As of v0.1.0 that skill ships as a **self-contained plugin** that bundles this engine (the `scripts/` here are vendored into it), so the skill no longer assumes a checkout of this repo is present. Standing-orders that still call scanners directly are tracked for migration in [#118](https://github.com/rossoctl/automation/issues/118). See the run-path design in `docs/specs/` and the epic [#72](https://github.com/rossoctl/automation/issues/72).
 
 ## Library structure & portability
 
