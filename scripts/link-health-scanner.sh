@@ -29,6 +29,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# LINK_CHECKER selects the link checker binary/script. Default stays lychee
+# until the python checker has shadowed enough scans to flip (repoman#3).
+LINK_CHECKER="${LINK_CHECKER:-lychee}"
+case "$LINK_CHECKER" in
+  python|lychee) ;;
+  *)
+    echo "ERROR: LINK_CHECKER must be 'python' or 'lychee' (got: $LINK_CHECKER)" >&2
+    exit 2
+    ;;
+esac
+
+# Shadow mode: write the same report document to LINK_HEALTH_SHADOW_OUT and
+# force dry-run mutation behavior so a python side-by-side run cannot poison
+# the production baseline or file issues.
+if [ -n "${LINK_HEALTH_SHADOW_OUT:-}" ]; then
+  DRY_RUN=true
+fi
+
 # Resolve deployment constants (repos_dir, fork_owner) from ~/.repoman/config.json.
 repoman_config
 
@@ -75,7 +93,9 @@ SCAN_ID=$(generate_scan_id "$REPORTS_DIR" "$SCAN_DATE")
 echo "=== Link Health Scan $SCAN_ID ==="
 echo "Repos dir: $REPOS_DIR"
 echo "Reports dir: $REPORTS_DIR"
+echo "Link checker: $LINK_CHECKER"
 if [ "$DRY_RUN" = true ]; then echo "Mode: DRY RUN (no issues, no PRs)"; fi
+if [ -n "${LINK_HEALTH_SHADOW_OUT:-}" ]; then echo "Shadow out: $LINK_HEALTH_SHADOW_OUT"; fi
 if [ "$ISSUE_LIMIT" -gt 0 ]; then echo "Issue limit: $ISSUE_LIMIT"; fi
 
 # --- Scan all repos ---
@@ -84,8 +104,11 @@ TOTAL_ERRORS=0
 REPOS_SCANNED=0
 REPOS_FAILED=0
 
-# Collect all broken links into a single JSONL file
+# Collect all findings (broken + unchecked) then split. Unchecked (egress
+# refusals) never open or auto-close issues.
+: > "$TMPDIR/all_findings.jsonl"
 : > "$TMPDIR/broken.jsonl"
+: > "$TMPDIR/unchecked.jsonl"
 
 # Drive the loop from the enrolled set (authoritative), statting each clone,
 # rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
@@ -107,10 +130,10 @@ while IFS= read -r full_repo; do
   # cannot catch it -- the file is non-empty). That same-name-different-owner
   # case is exactly what the owner-namespaced model exists to support.
   safe_repo="${full_repo//\//_}"
-  LYCHEE_OUTPUT="$TMPDIR/lychee_${safe_repo}.json"
+  CHECK_OUTPUT="$TMPDIR/linkcheck_${safe_repo}.json"
 
-  # Run lychee -- scanner-level args applied to all repos
-  LYCHEE_SCANNER_ARGS=(
+  # Scanner-level args applied to all repos. Shared by lychee and link-check.py.
+  LINK_CHECKER_ARGS=(
     --format json
     --scheme http --scheme https
     --exclude 'localhost' --exclude '127\.0\.0\.1' --exclude 'localtest\.me'
@@ -124,39 +147,75 @@ while IFS= read -r full_repo; do
     --max-concurrency 8
   )
 
+  CONFIG_ARGS=()
   if [ -f "$repo_dir/.lychee.toml" ]; then
-    lychee "${LYCHEE_SCANNER_ARGS[@]}" --config "$repo_dir/.lychee.toml" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
-  else
-    lychee "${LYCHEE_SCANNER_ARGS[@]}" "$repo_dir" > "$LYCHEE_OUTPUT" 2>/dev/null || true
+    CONFIG_ARGS=(--config "$repo_dir/.lychee.toml")
   fi
 
-  if [ ! -s "$LYCHEE_OUTPUT" ]; then
-    echo "  WARN: lychee produced no output for $full_repo"
+  if [ "$LINK_CHECKER" = "python" ]; then
+    python3 "$SCRIPT_DIR/link-check.py" "${LINK_CHECKER_ARGS[@]}" \
+      "${CONFIG_ARGS[@]}" "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
+  else
+    lychee "${LINK_CHECKER_ARGS[@]}" \
+      "${CONFIG_ARGS[@]}" "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
+  fi
+
+  if [ ! -s "$CHECK_OUTPUT" ]; then
+    echo "  WARN: $LINK_CHECKER produced no output for $full_repo"
     REPOS_FAILED=$((REPOS_FAILED + 1))
     continue
   fi
 
   # Parse results
-  repo_total=$(jq '.total // 0' "$LYCHEE_OUTPUT")
-  repo_errors=$(jq '.errors // 0' "$LYCHEE_OUTPUT")
+  repo_total=$(jq '.total // 0' "$CHECK_OUTPUT")
+  repo_errors=$(jq '.errors // 0' "$CHECK_OUTPUT")
   TOTAL_LINKS=$((TOTAL_LINKS + repo_total))
   TOTAL_ERRORS=$((TOTAL_ERRORS + repo_errors))
   REPOS_SCANNED=$((REPOS_SCANNED + 1))
 
-  # Extract broken links from the lychee report. The parsing/suppression/status
-  # normalization logic lives in extract-broken-links.sh so it can be unit-tested
-  # (see tests/test-extract-broken-links.sh).
+  # Extract findings from the checker report. Parsing/suppression/status
+  # normalization lives in extract-broken-links.sh (unit-tested).
   "$SCRIPT_DIR/extract-broken-links.sh" \
-    "$LYCHEE_OUTPUT" "$full_repo" "$repo_dir" \
-    >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
+    "$CHECK_OUTPUT" "$full_repo" "$repo_dir" \
+    >> "$TMPDIR/all_findings.jsonl" 2>/dev/null || true
 
   echo "  Links: $repo_total, Errors: $repo_errors"
 done <<< "$CLONES"
+
+# Split unchecked (egress refusals) out of the broken set. Unchecked never
+# opens or auto-closes an issue; it is reported for the owner to widen egress.
+if [ -s "$TMPDIR/all_findings.jsonl" ]; then
+  jq -c 'select(.status != "unchecked")' "$TMPDIR/all_findings.jsonl" \
+    > "$TMPDIR/broken.jsonl" 2>/dev/null || : > "$TMPDIR/broken.jsonl"
+  jq -c 'select(.status == "unchecked")' "$TMPDIR/all_findings.jsonl" \
+    > "$TMPDIR/unchecked.jsonl" 2>/dev/null || : > "$TMPDIR/unchecked.jsonl"
+else
+  : > "$TMPDIR/broken.jsonl"
+  : > "$TMPDIR/unchecked.jsonl"
+fi
+
+UNCHECKED_COUNT=$(jq -s 'length' "$TMPDIR/unchecked.jsonl" 2>/dev/null || echo 0)
+UNCHECKED_TOP_HOSTS_JSON=$(jq -s -c '
+  [ .[] | .url | capture("//(?<h>[^/]+)") | .h ]
+  | group_by(.)
+  | map({host: .[0], count: length})
+  | sort_by(-.count)
+  | .[0:10]
+' "$TMPDIR/unchecked.jsonl" 2>/dev/null || echo '[]')
+UNCHECKED_TOP_HOSTS_TEXT=$(echo "$UNCHECKED_TOP_HOSTS_JSON" | jq -r '
+  if length == 0 then "(none)"
+  else map("\(.host) (\(.count))") | join(", ")
+  end
+' 2>/dev/null || echo "(none)")
 
 echo ""
 echo "=== Scan complete ==="
 echo "Repos scanned: $REPOS_SCANNED (failed: $REPOS_FAILED)"
 echo "Total links: $TOTAL_LINKS, Total errors: $TOTAL_ERRORS"
+echo "Unchecked (egress refusals): $UNCHECKED_COUNT"
+if [ "$UNCHECKED_COUNT" -gt 0 ]; then
+  echo "Unchecked top hosts: $UNCHECKED_TOP_HOSTS_TEXT"
+fi
 
 # --- Load previous scan for diffing ---
 # Subset-run carry-forward (see docs/specs run-path, "Subset-aware stateful
@@ -188,6 +247,21 @@ if [ -n "${REPOMAN_SUBSET_REPOS:-}" ]; then
     "$ALL_PREV_BROKEN" > "$CARRY_BROKEN" 2>/dev/null || : > "$CARRY_BROKEN"
 else
   cp "$ALL_PREV_BROKEN" "$PREV_BROKEN"
+fi
+
+# Do not auto-close a previously broken link that is unchecked this run
+# (egress refusal is not evidence the link was fixed). Re-inject the prior
+# broken record (old status) into the current broken set so the diff treats
+# it as recurring. A later real HTTP success still closes it; a later real
+# 404 stays open.
+if [ -s "$TMPDIR/unchecked.jsonl" ] && [ -s "$PREV_BROKEN" ]; then
+  UNCHECKED_ARR=$(jq -s '.' "$TMPDIR/unchecked.jsonl" 2>/dev/null || echo '[]')
+  PREV_ARR=$(jq -s '.' "$PREV_BROKEN" 2>/dev/null || echo '[]')
+  jq -n -c --argjson unchecked "$UNCHECKED_ARR" --argjson prev "$PREV_ARR" '
+    ($unchecked | map([.repo, .file, .url] | join("|"))) as $keys |
+    $prev[] |
+    select(([.repo, .file, .url] | join("|")) as $k | ($keys | index($k)) != null)
+  ' >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
 fi
 
 # --- Compute diff using shared library ---
@@ -373,6 +447,8 @@ LATEST_JSON=$(cat << LATEST_EOF
   "repos_failed": $REPOS_FAILED,
   "total_links_checked": $TOTAL_LINKS,
   "broken": $BROKEN_ARRAY,
+  "unchecked_count": $UNCHECKED_COUNT,
+  "unchecked_top_hosts": $UNCHECKED_TOP_HOSTS_JSON,
   "delta": {
     "new": $NEW_LINKS,
     "fixed": $FIXED_LINKS,
@@ -381,6 +457,13 @@ LATEST_JSON=$(cat << LATEST_EOF
 }
 LATEST_EOF
 )
+
+# Shadow side-report: write the same document without touching the baseline.
+if [ -n "${LINK_HEALTH_SHADOW_OUT:-}" ]; then
+  mkdir -p "$(dirname "$LINK_HEALTH_SHADOW_OUT")"
+  printf '%s\n' "$LATEST_JSON" > "$LINK_HEALTH_SHADOW_OUT"
+  echo "Wrote shadow report: $LINK_HEALTH_SHADOW_OUT"
+fi
 
 # A dry run must NOT write the baseline: overwriting latest.json would make the
 # next real run see these findings as "recurring" (not "new") and skip filing
@@ -401,6 +484,7 @@ HISTORY_ROW=$(cat << HIST_EOF
   "total_links_checked": $TOTAL_LINKS,
   "broken_internal": $BROKEN_INTERNAL,
   "broken_external": $BROKEN_EXTERNAL,
+  "unchecked_count": $UNCHECKED_COUNT,
   "new": $NEW_LINKS,
   "fixed": $FIXED_LINKS,
   "issues_created": $ISSUES_CREATED,
@@ -510,6 +594,8 @@ cat > "$TMPDIR/link-health.md" << DASHBOARD_EOF
 | Total links checked | $TOTAL_LINKS |
 | Broken (internal) | $BROKEN_INTERNAL |
 | Broken (external) | $BROKEN_EXTERNAL |
+| Unchecked (egress refusals) | $UNCHECKED_COUNT |
+| Unchecked top hosts | $UNCHECKED_TOP_HOSTS_TEXT |
 | New since last scan | +$NEW_LINKS |
 | Fixed since last scan | -$FIXED_LINKS |
 
