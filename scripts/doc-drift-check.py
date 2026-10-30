@@ -99,8 +99,17 @@ class Finding:
 
     def key(self) -> str:
         claim_n = re.sub(r"\s+", " ", self.claim.strip().lower())
+        # doc_line keeps two hits of the same claim in one file (repeated
+        # versions, flags, retired names) from collapsing to the first.
         return "|".join(
-            [self.repo, self.check, self.doc_path, claim_n, self.code_path]
+            [
+                self.repo,
+                self.check,
+                self.doc_path,
+                claim_n,
+                self.code_path,
+                str(self.doc_line),
+            ]
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -149,10 +158,14 @@ def git_basenames(tree: Set[str]) -> Dict[str, List[str]]:
 def resolve_ref(clone: str, boundary: str, tag_pattern: str) -> Tuple[str, str]:
     """Return (sha, label). label is the tag name or 'HEAD'."""
     if boundary == "tags":
+        try:
+            tag_rx = re.compile(tag_pattern)
+        except re.error:
+            tag_rx = re.compile(DEFAULT_TAG_PATTERN)
         tags = [
             t
             for t in run_git(clone, "tag", "-l").splitlines()
-            if t and re.search(tag_pattern, t)
+            if t and tag_rx.search(t)
         ]
         if not tags:
             sha = run_git(clone, "rev-parse", "HEAD").strip()
@@ -209,8 +222,9 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
     """Parse the narrow YAML subset used by doc-drift config.
 
     List-vs-map for a bare ``key:`` is decided structurally: if the next
-    significant line is a ``- `` item at deeper indent, the value is a list;
-    otherwise it is a map. No hard-coded key names.
+    significant line is a ``- `` item at the same indent or deeper, the value
+    is a list. That covers YAML's compact sequence form (``key:`` then
+    ``- item`` in the same column). No hard-coded key names.
     """
     root: Dict[str, Any] = {}
     stack: List[Tuple[int, Any]] = [(-1, root)]
@@ -222,8 +236,15 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
         indent = len(raw) - len(raw.lstrip(" "))
         line = raw.strip()
 
-        while len(stack) > 1 and indent <= stack[-1][0]:
-            stack.pop()
+        # Dash items may sit in the same column as their key (compact
+        # sequences). Popping on ``<=`` would discard the list just pushed
+        # for that key. Other lines still close the block at ``<=``.
+        if line.startswith("- "):
+            while len(stack) > 1 and indent < stack[-1][0]:
+                stack.pop()
+        else:
+            while len(stack) > 1 and indent <= stack[-1][0]:
+                stack.pop()
         parent = stack[-1][1]
 
         if line.startswith("- "):
@@ -251,7 +272,7 @@ def parse_simple_yaml(text: str) -> Dict[str, Any]:
                 nxt = _next_significant_line(lines, i + 1)
                 if nxt is not None:
                     nxt_indent = len(nxt) - len(nxt.lstrip(" "))
-                    if nxt_indent > indent and nxt.lstrip().startswith("- "):
+                    if nxt_indent >= indent and nxt.lstrip().startswith("- "):
                         parent[key] = []
                         stack.append((indent, parent[key]))
                     else:
@@ -321,9 +342,14 @@ def load_config(clone: str, ref: str) -> Dict[str, Any]:
     cfg = parse_simple_yaml(text)
     cfg.setdefault("boundary", "main")
     cfg.setdefault("stable_tag_pattern", DEFAULT_TAG_PATTERN)
-    cfg.setdefault("ignore_paths", ["CHANGELOG.md", "docs/history/**"])
-    cfg.setdefault("sources_of_truth", [])
-    cfg.setdefault("retired_names", [])
+    # A failed list parse used to leave ``{}``, and setdefault would not
+    # replace it — so CHANGELOG.md dropped out of the default ignore list.
+    if not isinstance(cfg.get("ignore_paths"), list):
+        cfg["ignore_paths"] = ["CHANGELOG.md", "docs/history/**"]
+    if not isinstance(cfg.get("sources_of_truth"), list):
+        cfg["sources_of_truth"] = []
+    if not isinstance(cfg.get("retired_names"), list):
+        cfg["retired_names"] = []
     rel = cfg.get("release") or {}
     if not isinstance(rel, dict):
         rel = {}
@@ -428,10 +454,7 @@ def extract_script_tokens(script_text: str) -> Set[str]:
         for part in arm.split("|"):
             part = part.strip()
             if part and re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", part):
-                if not part.startswith("-"):
-                    tokens.add(part)
-                else:
-                    tokens.add(part)
+                tokens.add(part)
     # usage() lines mentioning subcommands
     for m in re.finditer(
         r"(?m)^\s{0,4}([a-z][a-z0-9-]*)\s+--", script_text
@@ -639,7 +662,41 @@ def check_enumerations(
         code_text = git_show(clone, ref, cfile)
         if code_text is None:
             continue
-        m = re.search(pattern, code_text)
+        if len(pattern) > 256:
+            findings.append(
+                Finding(
+                    check="config",
+                    kind="correction",
+                    mechanical=False,
+                    doc_path=CONFIG_PATH,
+                    doc_line=1,
+                    code_path=cfile,
+                    code_line=1,
+                    claim="sources_of_truth pattern is a valid regex",
+                    evidence=f"pattern longer than 256 characters in {CONFIG_PATH}",
+                    repo=repo,
+                )
+            )
+            continue
+        try:
+            compiled = re.compile(pattern)
+        except re.error as exc:
+            findings.append(
+                Finding(
+                    check="config",
+                    kind="correction",
+                    mechanical=False,
+                    doc_path=CONFIG_PATH,
+                    doc_line=1,
+                    code_path=cfile,
+                    code_line=1,
+                    claim="sources_of_truth pattern is a valid regex",
+                    evidence=f"invalid pattern {pattern!r}: {exc}",
+                    repo=repo,
+                )
+            )
+            continue
+        m = compiled.search(code_text)
         if not m:
             continue
         captured = m.group(1) if m.lastindex else m.group(0)
@@ -743,10 +800,45 @@ def check_retired_names(
 
 
 def extract_versions_from_text(text: str) -> List[Tuple[str, int]]:
+    """Versions named as the project's own version, not every semver.
+
+    Dependency pins (``foo==1.2.3``) and changelog history headings are not
+    matches: the line has to say "version" within a short gap of the number.
+    """
     found = []
-    for m in re.finditer(r"\b(?:v)?(\d+\.\d+\.\d+)\b", text):
+    for m in re.finditer(
+        r"(?i)\bversion\b[^0-9\n]{0,40}?v?(\d+\.\d+\.\d+)\b",
+        text,
+    ):
         found.append((m.group(1), text[: m.start()].count("\n") + 1))
     return found
+
+
+def _parse_iso(value: str) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def pr_is_unreleased(pr: Dict[str, Any], releases: List[Dict[str, Any]]) -> bool:
+    """True when the PR merged after the newest published stable release.
+
+    Dates win over a caller-supplied ``unreleased`` flag. The flag is only
+    a fallback for fixtures that do not pass ``mergedAt``.
+    """
+    published = [
+        dt
+        for dt in (_parse_iso(str(rel.get("publishedAt") or "")) for rel in releases)
+        if dt is not None
+    ]
+    cutoff = max(published) if published else None
+    merged = _parse_iso(str(pr.get("mergedAt") or ""))
+    if cutoff is not None and merged is not None:
+        return merged > cutoff
+    return bool(pr.get("unreleased"))
 
 
 def read_declared_versions(clone: str, ref: str, tree: Set[str]) -> Dict[str, Tuple[str, str, int]]:
@@ -787,31 +879,51 @@ def check_versions(
     docs: List[Tuple[str, str]],
     boundary_label: str,
     repo: str,
+    cfg: Dict[str, Any],
 ) -> List[Finding]:
     findings: List[Finding] = []
     declared = read_declared_versions(clone, ref, tree)
     if not declared:
         return findings
-    # Prefer marketplace version as canonical when present
+    # Prefer marketplace version as canonical when present. A stable tag
+    # does not replace it: on main the declared version is often ahead of
+    # the last tag, and rewriting docs back to the older tag is wrong.
     canon_ver, canon_path, canon_line = next(iter(declared.values()))
     for path, trip in declared.items():
         if "marketplace" in path:
             canon_ver, canon_path, canon_line = trip
             break
-    # When the boundary is a stable tag, that tag is the version users run.
     if boundary_label.startswith("v") and re.match(r"^v\d+\.\d+\.\d+$", boundary_label):
         tag_ver = boundary_label[1:]
         if tag_ver != canon_ver:
-            canon_ver = tag_ver
-            canon_path = f"tag:{boundary_label}"
-            canon_line = 1
+            findings.append(
+                Finding(
+                    check="versions",
+                    kind="correction",
+                    mechanical=False,
+                    doc_path=canon_path,
+                    doc_line=canon_line,
+                    code_path=f"tag:{boundary_label}",
+                    code_line=1,
+                    claim=f"declared version {canon_ver} matches tag {boundary_label}",
+                    evidence=(
+                        f"{canon_path} has {canon_ver}; tag {boundary_label} is {tag_ver}"
+                    ),
+                    repo=repo,
+                    replace_with="",
+                )
+            )
+    ignore = cfg.get("ignore_paths") or []
     for doc_path, text in docs:
-        if os.path.basename(doc_path).upper() == "CHANGELOG.md":
+        base = os.path.basename(doc_path).lower()
+        if base == "changelog.md" or path_ignored(doc_path, ignore):
+            continue
+        # requirements.txt and other prose pins are not the project version.
+        if doc_path.endswith(".txt"):
             continue
         for ver, line in extract_versions_from_text(text):
             if ver == canon_ver:
                 continue
-            # Ignore versions that appear only inside URLs or commit SHAs-ish
             findings.append(
                 Finding(
                     check="versions",
@@ -992,10 +1104,8 @@ def check_release(
             nums.add(int(m.group(1)))
         return nums
 
-    # Partition PRs: those merged after newest tag → Unreleased; others by tag range
-    # Caller is expected to pass only the relevant PR window; we still filter by citation.
+    # PRs merged after the newest published release belong in Unreleased.
     newest_ver = versioned[0][0] if versioned else None
-    newest_blob_cited = cited_numbers(text[versioned[0][2] : versioned[0][3]]) if versioned else set()
 
     unreleased_prs = []
     missing_by_section: Dict[str, List[Dict[str, Any]]] = {}
@@ -1016,9 +1126,7 @@ def check_release(
         # If the PR number appears anywhere in the changelog, treat as covered
         if num in cited_numbers(text):
             continue
-        # Heuristic: PRs marked unreleased by caller (mergedAt after newest tag)
-        # use a flag, else put under Unreleased draft
-        if pr.get("unreleased"):
+        if pr_is_unreleased(pr, releases):
             unreleased_prs.append(pr)
         elif newest_ver:
             missing_by_section.setdefault(newest_ver, []).append(pr)
@@ -1115,6 +1223,12 @@ def run_checks(
     preview_cfg = load_config(clone, head_sha)
     boundary = preview_cfg.get("boundary", "main")
     tag_pat = preview_cfg.get("stable_tag_pattern", DEFAULT_TAG_PATTERN)
+    tag_pattern_error = ""
+    try:
+        re.compile(str(tag_pat))
+    except re.error as exc:
+        tag_pattern_error = str(exc)
+        tag_pat = DEFAULT_TAG_PATTERN
     if ref_override:
         ref = ref_override
         label = ref_override
@@ -1137,11 +1251,26 @@ def run_checks(
             scan_files.append((p, text))
 
     findings: List[Finding] = []
+    if tag_pattern_error:
+        findings.append(
+            Finding(
+                check="config",
+                kind="correction",
+                mechanical=False,
+                doc_path=CONFIG_PATH,
+                doc_line=1,
+                code_path=CONFIG_PATH,
+                code_line=1,
+                claim="stable_tag_pattern is a valid regex",
+                evidence=f"invalid stable_tag_pattern: {tag_pattern_error}",
+                repo=repo,
+            )
+        )
     findings += check_paths(clone, ref, tree, docs, repo)
     findings += check_flags(clone, ref, tree, docs, repo)
     findings += check_enumerations(clone, ref, cfg, docs_index, repo)
     findings += check_retired_names(clone, ref, cfg, scan_files, repo)
-    findings += check_versions(clone, ref, tree, docs, label, repo)
+    findings += check_versions(clone, ref, tree, docs, label, repo, cfg)
     findings += check_absence_claims(clone, ref, tree, basenames, docs, repo)
     findings += check_release(clone, ref, cfg, releases, prs, repo)
 

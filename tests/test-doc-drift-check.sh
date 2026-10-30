@@ -342,6 +342,168 @@ else
   jq '[.findings[] | select(.check|startswith("release"))]' "$OUTC" || true
 fi
 
+# mergedAt before the newest publishedAt is already released, even if the
+# caller stamped unreleased:true. A later merge still drafts.
+cat > "$PR_JSON" <<'EOF'
+[
+  {
+    "number": 11,
+    "title": "feat: already shipped",
+    "url": "https://github.com/fixture/repo/pull/11",
+    "labels": [],
+    "mergedAt": "2026-10-01T00:00:00Z",
+    "unreleased": true
+  },
+  {
+    "number": 12,
+    "title": "feat: after the release",
+    "url": "https://github.com/fixture/repo/pull/12",
+    "labels": [],
+    "mergedAt": "2026-10-28T00:00:00Z",
+    "unreleased": false
+  }
+]
+EOF
+OUTD="$TMP/outd.json"
+python3 "$CHECK" --clone "$FIX" --repo "fixture/repo" --ref "$REF2" \
+  --releases-json "$REL_JSON" --prs-json "$PR_JSON" > "$OUTD"
+if jq -e '[.findings[] | select(.check=="release_draft") | .draft | contains("#11")] | any' "$OUTD" >/dev/null; then
+  fail_msg "release_draft: PR merged before publishedAt should not draft"
+  jq '[.findings[] | select(.check=="release_draft")]' "$OUTD" || true
+else
+  pass "release_draft: already-released PR is not unreleased"
+fi
+if jq -e '[.findings[] | select(.check=="release_draft") | .draft | contains("#12")] | any' "$OUTD" >/dev/null; then
+  pass "release_draft: PR merged after publishedAt drafts"
+else
+  fail_msg "release_draft: PR merged after publishedAt should draft"
+  jq '[.findings[] | select(.check=="release_draft")]' "$OUTD" || true
+fi
+
+# Compact YAML sequences, changelog history, and project-version lines.
+python3 - "$CHECK" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("dd", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+text = """retired_names:
+- old-name
+ignore_paths:
+- vendor/
+sources_of_truth:
+- name: version
+  code:
+    path: VERSION
+"""
+got = mod.parse_simple_yaml(text)
+assert got["retired_names"] == ["old-name"], got
+assert got["ignore_paths"] == ["vendor/"], got
+assert got["sources_of_truth"][0]["code"]["path"] == "VERSION", got
+assert "code" not in got, got
+PY
+pass "yaml: compact sequences stay lists"
+
+VER="$TMP/versions"
+mkdir -p "$VER/.claude-plugin" "$VER/.repoman"
+cat > "$VER/.claude-plugin/marketplace.json" <<'EOF'
+{"version": "2.0.0"}
+EOF
+cat > "$VER/CHANGELOG.md" <<'EOF'
+# Changelog
+
+## [1.0.0] - 2026-01-01
+
+## [2.0.0] - 2026-02-01
+EOF
+cat > "$VER/requirements.txt" <<'EOF'
+foo==1.2.3
+EOF
+cat > "$VER/README.md" <<'EOF'
+# App
+
+The plugin version is 2.0.0.
+
+The plugin version is 9.9.9.
+Also the version is 8.8.8.
+EOF
+cat > "$VER/.repoman/doc-drift.yaml" <<'EOF'
+boundary: tags
+stable_tag_pattern: '^v\d+\.\d+\.\d+$'
+retired_names:
+- old-name
+ignore_paths:
+- vendor/
+sources_of_truth:
+- name: version
+  code:
+    path: VERSION
+EOF
+git -C "$VER" init -q
+git -C "$VER" -c user.email=t@t -c user.name=t add -A
+git -C "$VER" -c user.email=t@t -c user.name=t commit -qm "ver"
+git -C "$VER" tag v1.0.0
+OUTV="$TMP/outv.json"
+python3 "$CHECK" --clone "$VER" --repo "fixture/versions" \
+  --releases '[]' --prs '[]' > "$OUTV"
+if jq -e '[.findings[] | select(.check=="versions" and (.doc_path|test("CHANGELOG")))] | length == 0' "$OUTV" >/dev/null; then
+  pass "versions: changelog history is not drift"
+else
+  fail_msg "versions: changelog history flagged"
+  jq '[.findings[] | select(.check=="versions")]' "$OUTV" || true
+fi
+if jq -e '[.findings[] | select(.doc_path=="requirements.txt")] | length == 0' "$OUTV" >/dev/null; then
+  pass "versions: dependency pins are not the project version"
+else
+  fail_msg "versions: requirements.txt pin flagged"
+fi
+vcount=$(jq '[.findings[] | select(.check=="versions" and .doc_path=="README.md" and .mechanical==true)] | length' "$OUTV")
+if [ "$vcount" = "2" ]; then
+  pass "versions: both project-version lines survive dedupe"
+else
+  fail_msg "versions: expected 2 README findings, got $vcount"
+  jq '[.findings[] | select(.check=="versions")]' "$OUTV" || true
+fi
+if jq -e '[.findings[] | select(.check=="versions" and .mechanical==false and (.evidence|test("tag v1.0.0")))] | length == 1' "$OUTV" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="versions" and .mechanical==true and .replace_with=="1.0.0")] | length == 0' "$OUTV" >/dev/null; then
+  pass "versions: older tag is a non-mechanical mismatch, not the canon"
+else
+  fail_msg "versions: tag should not override the declared version"
+  jq '[.findings[] | select(.check=="versions")]' "$OUTV" || true
+fi
+
+BAD="$TMP/badre"
+mkdir -p "$BAD/.repoman"
+echo 'stable_tag_pattern: "("' > "$BAD/.repoman/doc-drift.yaml"
+echo '{"version":"1.0.0"}' > "$BAD/package.json"
+git -C "$BAD" init -q
+git -C "$BAD" -c user.email=t@t -c user.name=t add -A
+git -C "$BAD" -c user.email=t@t -c user.name=t commit -qm "bad"
+OUTB="$TMP/outb.json"
+if python3 "$CHECK" --clone "$BAD" --repo "fixture/bad" --releases '[]' --prs '[]' > "$OUTB"; then
+  if jq -e '[.findings[] | select(.check=="config")] | length > 0' "$OUTB" >/dev/null; then
+    pass "config: invalid stable_tag_pattern is a finding, not a crash"
+  else
+    fail_msg "config: invalid pattern produced no finding"
+  fi
+else
+  fail_msg "config: invalid pattern crashed the checker"
+fi
+
+# Line-scoped replace: 1.2.3 must not match inside 11.2.30, and only line 2 changes.
+EDIT="$TMP/edit.md"
+printf 'keep 11.2.30 and 1.2.3\nreplace 1.2.3 here\nkeep 1.2.3\n' > "$EDIT"
+# shellcheck disable=SC1090
+eval "$(sed -n '/^replace_on_line() {$/,/^}$/p' "$SCRIPT_DIR/../scripts/doc-drift-fixer.sh")"
+if replace_on_line "$EDIT" 2 "1.2.3" "2.0.0" \
+  && [ "$(sed -n '1p' "$EDIT")" = "keep 11.2.30 and 1.2.3" ] \
+  && [ "$(sed -n '2p' "$EDIT")" = "replace 2.0.0 here" ] \
+  && [ "$(sed -n '3p' "$EDIT")" = "keep 1.2.3" ]; then
+  pass "fixer: replace touches only the flagged line"
+else
+  fail_msg "fixer: line-scoped replace"
+  cat "$EDIT" || true
+fi
+
 if [ "$fail" -ne 0 ]; then
   echo "FAILED"
   exit 1
