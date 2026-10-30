@@ -79,7 +79,8 @@ Entries are removed from state when:
 - Outputs JSON queue to stdout (backward compatible)
 
 **Fixer** (`pr-review-fixer.sh`):
-- Two modes: `begin` (mark in_progress, output queue) and `finalize` (confirm reviews, update state)
+- `begin` marks in_progress and prints the queue; `finalize` confirms reviews and updates state; `footer` prints the pinned-SHA line
+- Append that `footer` line to the review body and its Slack post. Inline comments do not get one.
 - Agent reviews PRs between begin and finalize calls
 - Writes `fixer-history.json`
 
