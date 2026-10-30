@@ -72,7 +72,8 @@ if [ -z "$COMMAND" ]; then
   exit 1
 fi
 
-# Pin provenance (6a: create-only _meta, blob/main fallback). `footer` is the
+# Pin provenance: write _meta only after the SHA resolves, never overwrite a
+# valid file, and fall back to blob/main when resolution fails. `footer` is the
 # line for the review body and its Slack post. Inline comments do not get it.
 SKILL_FOOTER=$(skill_attribution "github-pr-review")
 if [ "$COMMAND" = "footer" ]; then

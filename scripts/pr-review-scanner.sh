@@ -58,7 +58,8 @@ USAGE
   exit 0
 fi
 
-# Pin provenance on startup (6a). Resolution failure must not fail the scan.
+# Pin provenance on startup: write _meta only after the SHA resolves, and never
+# overwrite a valid file. Resolution failure must not fail the scan.
 skill_attribution "github-pr-review" >/dev/null
 
 # Resolve the enrolled repo set from ~/.repoman/repos.json (owner/name tuples).

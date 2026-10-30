@@ -83,7 +83,8 @@ if [ ! -f "$REPORT_PY" ]; then
   exit 1
 fi
 
-# Pin provenance (6a) and append that exact line to the report that gets posted.
+# Pin provenance and append that exact line to the report that gets posted.
+# Write _meta only after the SHA resolves; never overwrite a valid file.
 SKILL_FOOTER=$(skill_attribution "github-weekly-report")
 
 # Build args. $repos is intentionally unquoted so each owner/name line becomes a
