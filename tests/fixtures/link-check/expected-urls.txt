@@ -1,0 +1,6 @@
+https://extract.example/autolink
+https://extract.example/bare
+https://extract.example/html-href
+https://extract.example/html-src
+https://extract.example/image.png
+https://extract.example/inline

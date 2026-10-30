@@ -174,6 +174,17 @@ jq -n '{ error_map: { "docs/g.md": [ { url: "Error building URL", status: {text:
 run_test "non-URL entry skipped" "$TEST_TMPDIR/nonurl.json" 'length' '0'
 
 # =============================================================================
+# unchecked: egress-proxy refusal must keep its own token (not fall to error)
+# =============================================================================
+echo "Test 10b: unchecked status token preserved"
+write_fixture "$TEST_TMPDIR/unchecked.json" \
+  "docs/egress.md" \
+  "https://unlisted.example.net/x" \
+  '{"text":"unchecked","details":"Tunnel connection failed: 403 Forbidden"}'
+run_test "unchecked status token" "$TEST_TMPDIR/unchecked.json" '.[0].status' 'unchecked'
+run_test "unchecked still emits a record" "$TEST_TMPDIR/unchecked.json" 'length' '1'
+
+# =============================================================================
 # Stdin path: reading the report via "-" behaves like reading from a file
 # =============================================================================
 echo "Test 11: stdin (-) path works"
