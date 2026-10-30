@@ -4,4 +4,3 @@ https://extract.example/html-href
 https://extract.example/html-src
 https://extract.example/image.png
 https://extract.example/inline
-https://extract.example/reference

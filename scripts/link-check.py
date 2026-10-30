@@ -95,7 +95,8 @@ INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 MD_INLINE_RE = re.compile(
     r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)"
 )
-MD_REF_DEF_RE = re.compile(r"^\s*\[[^\]]+\]:\s*(\S+)", re.MULTILINE)
+MD_REF_DEF_RE = re.compile(r"^\s*\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
+MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 MD_AUTOLINK_RE = re.compile(r"<(https?://[^>\s]+)>", re.IGNORECASE)
 BARE_URL_RE = re.compile(r"(?<![(\[<\"'])(https?://[^\s<>\)\]\"']+)", re.IGNORECASE)
 
@@ -152,11 +153,31 @@ def _strip_code_regions(text: str) -> str:
     return "".join(out)
 
 
+def _drop_unused_ref_defs(text: str) -> str:
+    """Remove `[label]: url` lines whose label is never referenced.
+
+    Lychee does not extract those unused definitions, and a later bare-URL
+    pass would otherwise treat the definition target as a link.
+    """
+    used = set()
+    for text_label, ref_label in MD_REF_USE_RE.findall(text):
+        label = (ref_label or text_label).strip().lower()
+        if label:
+            used.add(label)
+
+    def repl(match: re.Match) -> str:
+        if match.group(1).strip().lower() in used:
+            return match.group(0)
+        return ""
+
+    return MD_REF_DEF_RE.sub(repl, text)
+
+
 def extract_urls_from_text(text: str) -> List[str]:
-    cleaned = _strip_code_regions(text)
+    cleaned = _drop_unused_ref_defs(_strip_code_regions(text))
     found: List[str] = []
     found.extend(MD_INLINE_RE.findall(cleaned))
-    found.extend(MD_REF_DEF_RE.findall(cleaned))
+    found.extend(url for _label, url in MD_REF_DEF_RE.findall(cleaned))
     found.extend(MD_AUTOLINK_RE.findall(cleaned))
     found.extend(BARE_URL_RE.findall(cleaned))
 
@@ -322,15 +343,7 @@ def _is_egress_refusal(exc: BaseException) -> bool:
     lower = msg.lower()
     if "tunnel connection failed" in lower and "403" in msg:
         return True
-    # Connection reset/close while establishing the CONNECT tunnel.
-    if isinstance(exc, (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
-        return True
-    if isinstance(exc, OSError) and getattr(exc, "errno", None) in (
-        getattr(__import__("errno"), "ECONNRESET", 104),
-        getattr(__import__("errno"), "EPIPE", 32),
-        getattr(__import__("errno"), "ECONNABORTED", 103),
-    ):
-        return True
+    # A reset after the CONNECT tunnel is up is the origin, not an egress refusal.
     if "tunnel connection failed" in lower and any(
         tok in lower for tok in ("reset", "closed", "refused", "abort")
     ):
@@ -361,9 +374,30 @@ def _classify_exception(exc: BaseException) -> Dict[str, object]:
     return {"text": "Network error", "details": str(exc)}
 
 
-def _open(req: urllib.request.Request, timeout: float):
+def _open(req: urllib.request.Request, timeout: float, exclude_private: bool = False):
     ctx = ssl.create_default_context()
-    return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+
+    class _LimitedRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+            if exclude_private:
+                host = urllib.parse.urlparse(newurl).hostname or ""
+                if host and is_private_host(host) is True:
+                    raise urllib.error.URLError(f"redirect to private host {host}")
+            count = getattr(req, "_redirect_count", 0) + 1
+            if count > MAX_REDIRECTS:
+                raise urllib.error.HTTPError(
+                    req.full_url, code, f"too many redirects (>{MAX_REDIRECTS})", headers, fp
+                )
+            new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new_req is not None:
+                new_req._redirect_count = count  # type: ignore[attr-defined]
+            return new_req
+
+    opener = urllib.request.build_opener(
+        _LimitedRedirect,
+        urllib.request.HTTPSHandler(context=ctx),
+    )
+    return opener.open(req, timeout=timeout)
 
 
 def check_one(
@@ -371,6 +405,7 @@ def check_one(
     timeout: float,
     max_retries: int,
     accept: Set[int],
+    exclude_private: bool = False,
 ) -> Optional[Dict[str, object]]:
     """Return a status dict on failure/unchecked, or None on success."""
     attempts = max_retries + 1
@@ -378,7 +413,7 @@ def check_one(
 
     for attempt in range(attempts):
         try:
-            status = _check_once(url, timeout, accept)
+            status = _check_once(url, timeout, accept, exclude_private)
             if status is None:
                 return None
             # Retry on 429.
@@ -425,17 +460,19 @@ def check_one(
     return last_status
 
 
-def _check_once(url: str, timeout: float, accept: Set[int]) -> Optional[Dict[str, object]]:
+def _check_once(
+    url: str, timeout: float, accept: Set[int], exclude_private: bool = False
+) -> Optional[Dict[str, object]]:
     headers = {"User-Agent": USER_AGENT}
     # HEAD first.
     try:
         req = urllib.request.Request(url, method="HEAD", headers=headers)
-        with _open(req, timeout) as resp:
+        with _open(req, timeout, exclude_private) as resp:
             code = getattr(resp, "status", None) or resp.getcode()
             if code in accept:
                 return None
             if code in (405, 403, 501):
-                return _get_fallback(url, timeout, accept, headers)
+                return _get_fallback(url, timeout, accept, headers, exclude_private)
             if code == 429:
                 return {
                     "code": 429,
@@ -448,7 +485,7 @@ def _check_once(url: str, timeout: float, accept: Set[int]) -> Optional[Dict[str
         if code in accept:
             return None
         if code in (405, 403, 501):
-            return _get_fallback(url, timeout, accept, headers)
+            return _get_fallback(url, timeout, accept, headers, exclude_private)
         if code == 429:
             return {
                 "code": 429,
@@ -461,11 +498,15 @@ def _check_once(url: str, timeout: float, accept: Set[int]) -> Optional[Dict[str
 
 
 def _get_fallback(
-    url: str, timeout: float, accept: Set[int], headers: Dict[str, str]
+    url: str,
+    timeout: float,
+    accept: Set[int],
+    headers: Dict[str, str],
+    exclude_private: bool = False,
 ) -> Optional[Dict[str, object]]:
     try:
         req = urllib.request.Request(url, method="GET", headers=headers)
-        with _open(req, timeout) as resp:
+        with _open(req, timeout, exclude_private) as resp:
             code = getattr(resp, "status", None) or resp.getcode()
             # Drain a little so some servers don't reset.
             try:
@@ -559,7 +600,7 @@ def check_all(
         host = urllib.parse.urlparse(url).hostname or ""
         host_pool.acquire(host)
         try:
-            status = check_one(url, timeout, max_retries, accept)
+            status = check_one(url, timeout, max_retries, accept, exclude_private)
         finally:
             host_pool.release(host)
         return filepath, url, status
@@ -614,23 +655,6 @@ def parse_accept(raw: str) -> Set[int]:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    # urllib follows redirects by default; raise_on_redirect is not set.
-    # Cap redirects by installing a custom opener redirect handler.
-    class _LimitedRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
-            count = getattr(req, "_redirect_count", 0) + 1
-            if count > MAX_REDIRECTS:
-                raise urllib.error.HTTPError(
-                    req.full_url, code, f"too many redirects (>{MAX_REDIRECTS})", headers, fp
-                )
-            new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
-            if new_req is not None:
-                new_req._redirect_count = count  # type: ignore[attr-defined]
-            return new_req
-
-    opener = urllib.request.build_opener(_LimitedRedirect)
-    urllib.request.install_opener(opener)
-
     args = build_arg_parser().parse_args(argv)
     schemes = {s.lower() for s in (args.scheme or ["http", "https"])}
     excludes = list(args.exclude)
