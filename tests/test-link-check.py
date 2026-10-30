@@ -81,6 +81,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Location", "/ok")
             self.send_header("Content-Length", "0")
             self.end_headers()
+        elif path == "/redirect-private":
+            self.send_response(302)
+            self.send_header("Location", "http://10.0.0.1/secret")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         elif path == "/rate":
             # First request 429 with Retry-After: 0; subsequent 200.
             count = getattr(self.server, "rate_count", 0)
@@ -157,6 +162,14 @@ class ExtractionTests(unittest.TestCase):
         ):
             self.assertNotIn(bad, urls)
 
+    def test_unused_reference_definition_skipped(self):
+        text = "[ref]: https://extract.example/reference\n"
+        self.assertNotIn("https://extract.example/reference", lc.extract_urls_from_text(text))
+
+    def test_used_reference_definition_kept(self):
+        text = "See [docs][ref].\n\n[ref]: https://extract.example/reference\n"
+        self.assertIn("https://extract.example/reference", lc.extract_urls_from_text(text))
+
 
 class CollectTests(unittest.TestCase):
     def test_exclude_path(self):
@@ -200,6 +213,11 @@ class CheckBehaviorTests(unittest.TestCase):
         status = lc.check_one(f"{self.base}/redirect", 5, 0, {200})
         self.assertIsNone(status)
 
+    def test_private_redirect_not_fetched(self):
+        status = lc.check_one(f"{self.base}/redirect-private", 5, 0, {200}, exclude_private=True)
+        self.assertIsNotNone(status)
+        self.assertIn("private", str(status.get("details", "")).lower())
+
     def test_retry_after_429(self):
         status = lc.check_one(f"{self.base}/rate", 5, 2, {200})
         self.assertIsNone(status)
@@ -240,6 +258,18 @@ class CheckBehaviorTests(unittest.TestCase):
 
 
 class EgressRefusalTests(unittest.TestCase):
+    def test_origin_reset_behind_proxy_is_not_unchecked(self):
+        old = os.environ.get("https_proxy")
+        os.environ["https_proxy"] = "http://127.0.0.1:9"
+        try:
+            self.assertFalse(lc._is_egress_refusal(ConnectionResetError(54, "Connection reset by peer")))
+            self.assertTrue(lc._is_egress_refusal(OSError("Tunnel connection failed: 403 Forbidden")))
+        finally:
+            if old is None:
+                os.environ.pop("https_proxy", None)
+            else:
+                os.environ["https_proxy"] = old
+
     def test_proxy_connect_403_is_unchecked(self):
         proxy, proxy_url = start_proxy()
         old = {k: os.environ.get(k) for k in ("http_proxy", "https_proxy", "HTTPS_PROXY", "HTTP_PROXY")}

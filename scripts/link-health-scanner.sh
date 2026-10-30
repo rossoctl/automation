@@ -154,10 +154,10 @@ while IFS= read -r full_repo; do
 
   if [ "$LINK_CHECKER" = "python" ]; then
     python3 "$SCRIPT_DIR/link-check.py" "${LINK_CHECKER_ARGS[@]}" \
-      "${CONFIG_ARGS[@]}" "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
+      ${CONFIG_ARGS[@]+"${CONFIG_ARGS[@]}"} "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
   else
     lychee "${LINK_CHECKER_ARGS[@]}" \
-      "${CONFIG_ARGS[@]}" "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
+      ${CONFIG_ARGS[@]+"${CONFIG_ARGS[@]}"} "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
   fi
 
   if [ ! -s "$CHECK_OUTPUT" ]; then
