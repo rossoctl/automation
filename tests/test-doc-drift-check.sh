@@ -385,6 +385,9 @@ python3 - "$CHECK" <<'PY'
 import importlib.util, sys
 spec = importlib.util.spec_from_file_location("dd", sys.argv[1])
 mod = importlib.util.module_from_spec(spec)
+# Python 3.14 dataclasses look up cls.__module__ in sys.modules while
+# processing the class. Register the module before exec or that lookup is None.
+sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 text = """retired_names:
 - old-name
