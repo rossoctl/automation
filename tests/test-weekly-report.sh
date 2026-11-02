@@ -90,10 +90,10 @@ err=$(REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
 case "$err" in
   *"workspaces/shared"*)
     echo "FAIL default still points at the OpenClaw \$HOME/workspaces path: [$err]"; fail=1 ;;
-  *github-weekly-report/scripts/report.py*)
-    : ;;  # names the bundle-relative generator — correct
+  *"$expected_default"*)
+    : ;;  # names the exact wrapper-relative bundled generator — correct
   *)
-    echo "FAIL default error names neither the bundle path nor workspaces: [$err]"; fail=1 ;;
+    echo "FAIL default error does not name the wrapper-relative generator ($expected_default): [$err]"; fail=1 ;;
 esac
 
 if [ "$fail" -eq 0 ]; then echo "PASS test-weekly-report.sh"; fi
