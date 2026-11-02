@@ -510,7 +510,7 @@ fi
 # Precision: flags bind to the span that names the script, prose and inner
 # case arms are not subcommands, and a basename resolves to the tree.
 PREC="$TMP/prec"
-mkdir -p "$PREC/scripts" "$PREC/skills/repoman/scripts" "$PREC/docs"
+mkdir -p "$PREC/scripts" "$PREC/skills/repoman/scripts" "$PREC/docs/history" "$PREC/.repoman"
 cat > "$PREC/scripts/program-lib.sh" <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -554,6 +554,21 @@ cat > "$PREC/scripts/link-health-fixer.sh" <<'EOF'
 #!/usr/bin/env bash
 echo fixer
 EOF
+cat > "$PREC/skills/repoman/scripts/org.sh" <<'EOF'
+#!/usr/bin/env bash
+echo org
+EOF
+cat > "$PREC/skills/repoman/SKILL.md" <<'EOF'
+The helper is `scripts/org.sh`.
+EOF
+cat > "$PREC/.repoman/doc-drift.yaml" <<'EOF'
+ignore_paths:
+  - docs/history/**
+EOF
+cat > "$PREC/docs/history/old.md" <<'EOF'
+Missing `scripts/nope.sh`.
+Run `beta.sh --dry-run` from a history page.
+EOF
 cat > "$PREC/README.md" <<'EOF'
 # Prec
 
@@ -564,6 +579,8 @@ See `alpha.sh` and `beta.sh` for the scanners.
 
 Run `alpha.sh --dry-run` to preview.
 Run `beta.sh --dry-run` when that script has no such flag.
+Run `beta.sh --dry-run` when that script has no such flag.
+`scripts/alpha.sh` and `scripts/beta.sh --frobnicate`
 `scripts/x.sh --only-scripts` names one of the two copies.
 The bare `x.sh --only-scripts` name is ambiguous.
 `alpha.sh` has no `--bogus` flag.
@@ -584,17 +601,22 @@ git -C "$PREC" -c user.email=t@t -c user.name=t commit -qm "prec"
 OUTP="$TMP/outp.json"
 python3 "$CHECK" --clone "$PREC" --repo "fixture/prec" \
   --releases '[]' --prs '[]' > "$OUTP"
+dry_lines=$(jq -r '[.findings[] | select(.check=="flags" and .code_path=="scripts/beta.sh" and (.claim|test("dry-run"))) | .doc_line] | unique | length' "$OUTP")
 if jq -e '[.findings[] | select(.check=="flags" and (.claim|test("profile|org|only-scripts|bogus|Each|writes|central|same|\\bend\\b")))] | length == 0' "$OUTP" >/dev/null \
-  && jq -e '[.findings[] | select(.check=="flags" and .code_path=="scripts/beta.sh" and (.claim|test("dry-run")))] | length == 1' "$OUTP" >/dev/null \
-  && jq -e '[.findings[] | select(.check=="flags" and .doc_path=="scripts/prose.sh")] | length == 0' "$OUTP" >/dev/null; then
-  pass "flags: span binding ignores shared prose and inner case arms"
+  && [ "$dry_lines" = "2" ] \
+  && jq -e '[.findings[] | select(.check=="flags" and (.claim|test("frobnicate")) and .code_path=="scripts/beta.sh")] | length == 1' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="flags" and (.claim|test("frobnicate")) and .code_path=="scripts/alpha.sh")] | length == 0' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="flags" and .doc_path=="scripts/prose.sh")] | length == 0' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="flags" and .doc_path=="docs/history/old.md")] | length == 0' "$OUTP" >/dev/null; then
+  pass "flags: nearest script, duplicate lines, and ignore_paths"
 else
   fail_msg "flags: span binding"
   jq '[.findings[] | select(.check=="flags")]' "$OUTP" || true
 fi
 if jq -e '[.findings[] | select(.check=="paths")] | length == 1' "$OUTP" >/dev/null \
-  && jq -e '[.findings[] | select(.check=="paths" and .mechanical==false and (.claim|test("scripts/missing.sh")))] | length == 1' "$OUTP" >/dev/null; then
-  pass "paths: basename resolves, non-paths and missing.sh only"
+  && jq -e '[.findings[] | select(.check=="paths" and .mechanical==false and (.claim|test("scripts/missing.sh")))] | length == 1' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="paths" and (.claim|test("org.sh|nope.sh")))] | length == 0' "$OUTP" >/dev/null; then
+  pass "paths: basename, bundle-relative, and ignore_paths"
 else
   fail_msg "paths: precision"
   jq '[.findings[] | select(.check=="paths")]' "$OUTP" || true

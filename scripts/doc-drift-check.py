@@ -447,10 +447,13 @@ def check_paths(
     basenames: Dict[str, List[str]],
     docs: List[Tuple[str, str]],
     repo: str,
+    ignore: Sequence[str],
 ) -> List[Finding]:
     findings: List[Finding] = []
     top = {p.split("/", 1)[0] for p in tree}
     for doc_path, text in docs:
+        if path_ignored(doc_path, ignore):
+            continue
         doc_dir = os.path.dirname(doc_path)
         seen: Set[str] = set()
         for rx in (BACKTICK_PATH, MD_LINK_PATH):
@@ -488,6 +491,17 @@ def check_paths(
                         candidates.append(rel)
                 if any(_in_tree(tree, c) for c in candidates):
                     continue
+                # A bundled skill doc cites `scripts/org.sh` for the copy that
+                # lives next to the doc (`skills/repoman/scripts/org.sh`).
+                # That hit suppresses the finding; it does not create one.
+                if (
+                    doc_dir
+                    and not raw.startswith(("/", "./", "../"))
+                    and "/" in raw
+                ):
+                    bundled = _repo_relative(f"{doc_dir}/{raw}")
+                    if bundled and _in_tree(tree, bundled):
+                        continue
                 # A bare filename exists when any tree path has that basename.
                 if bare:
                     base = os.path.basename(raw.rstrip("/"))
@@ -729,28 +743,24 @@ def _accepted_flags(
     return flags - META_FLAGS
 
 
-def _doc_spans(text: str) -> List[str]:
-    """Non-empty lines. A flag binds only to scripts named on that same line.
+def _doc_spans(text: str) -> List[Tuple[int, str]]:
+    """Non-empty lines paired with their byte offset in ``text``.
 
-    Fence markers are not spans. A multi-line bullet does not carry a script
-    mention on the first line onto flags written on the continuation: those
-    flags name whichever script is on their own line.
+    Fence markers are not spans. The offset is required because two identical
+    lines must stay two findings; ``str.find`` would keep only the first.
     """
-    spans: List[str] = []
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            continue
-        if line.strip():
-            spans.append(line)
+    spans: List[Tuple[int, str]] = []
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        body = line.splitlines()[0] if line.splitlines() else ""
+        if body.strip() and not body.lstrip().startswith("```"):
+            spans.append((offset, body))
+        offset += len(line)
     return spans
 
 
-def _line_in_span(text: str, span: str, needle: str) -> int:
-    idx = text.find(span)
-    local = span.find(needle)
-    if idx < 0 or local < 0:
-        return line_of(text, needle)
-    return text[: idx + local].count("\n") + 1
+def _line_at(text: str, offset: int) -> int:
+    return text[:offset].count("\n") + 1
 
 
 def _subcommand_after_mention(span: str, end: int) -> Optional[str]:
@@ -775,6 +785,7 @@ def check_flags(
     tree: Set[str],
     docs: List[Tuple[str, str]],
     repo: str,
+    ignore: Sequence[str],
 ) -> List[Finding]:
     findings: List[Finding] = []
     by_base = _scripts_by_basename(tree)
@@ -789,6 +800,8 @@ def check_flags(
     for paths in by_base.values():
         for spath in paths:
             if spath.startswith("tests/") or "/tests/" in spath:
+                continue
+            if path_ignored(spath, ignore):
                 continue
             script_text = show(spath)
             if script_text is None:
@@ -830,23 +843,23 @@ def check_flags(
                 )
 
     for doc_path, text in docs:
-        for span in _doc_spans(text):
+        if path_ignored(doc_path, ignore):
+            continue
+        for offset, span in _doc_spans(text):
             mentions: List[Tuple[int, str]] = []
-            seen_paths: Set[str] = set()
             for m in _SCRIPT_MENTION_RE.finditer(span):
                 if re.search(r"https?://\S*$", span[: m.start()]):
                     continue
                 spath = _resolve_script_mention(m.group(1), by_base)
-                if not spath or spath in seen_paths:
+                if not spath:
                     continue
-                seen_paths.add(spath)
                 mentions.append((m.end(), spath))
             if not mentions:
                 continue
-            # A flag belongs to the script named before it on this line
-            # (`tool.sh --dry-run`). A flag that appears first belongs to
-            # whatever command preceded the script (`shellcheck --severity`
-            # then a test path). `--flag` is the generic word, not an option.
+            # A flag belongs to the nearest script named before it on this
+            # line. ``alpha.sh and beta.sh --frobnicate`` is a claim about
+            # beta only. A flag that appears first belongs to whatever command
+            # preceded the script. `--flag` is the generic word, not an option.
             flag_at = []
             for m in FLAG_RE.finditer(span):
                 if m.group(1) in META_FLAGS or m.group(1) == "--flag":
@@ -856,27 +869,37 @@ def check_flags(
                 if re.search(r"\b(?:no|not|without)\b", prefix, re.I):
                     continue
                 flag_at.append(m)
-            for _end, spath in mentions:
+            doc_line = _line_at(text, offset)
+            for fm in flag_at:
+                prior = [pair for pair in mentions if pair[0] <= fm.start()]
+                if not prior:
+                    continue
+                _end, spath = max(prior, key=lambda pair: pair[0])
                 script_text = show(spath)
                 if script_text is None:
                     continue
                 accepted = _accepted_flags(script_text, by_base, show)
-                span_flags = {m.group(1) for m in flag_at if m.start() >= _end}
-                for flag in sorted(span_flags - accepted):
-                    findings.append(
-                        Finding(
-                            check="flags",
-                            kind="correction",
-                            mechanical=False,
-                            doc_path=doc_path,
-                            doc_line=_line_in_span(text, span, flag),
-                            code_path=spath,
-                            code_line=1,
-                            claim=f"{os.path.basename(spath)} accepts `{flag}`",
-                            evidence=f"`{flag}` not found in parser of {spath}",
-                            repo=repo,
-                        )
+                flag = fm.group(1)
+                if flag in accepted:
+                    continue
+                findings.append(
+                    Finding(
+                        check="flags",
+                        kind="correction",
+                        mechanical=False,
+                        doc_path=doc_path,
+                        doc_line=doc_line,
+                        code_path=spath,
+                        code_line=1,
+                        claim=f"{os.path.basename(spath)} accepts `{flag}`",
+                        evidence=f"`{flag}` not found in parser of {spath}",
+                        repo=repo,
                     )
+                )
+            for _end, spath in mentions:
+                script_text = show(spath)
+                if script_text is None:
+                    continue
                 sub = _subcommand_after_mention(span, _end)
                 if sub and sub not in _case_subcommands(script_text):
                     findings.append(
@@ -885,7 +908,7 @@ def check_flags(
                             kind="correction",
                             mechanical=False,
                             doc_path=doc_path,
-                            doc_line=_line_in_span(text, span, sub),
+                            doc_line=doc_line,
                             code_path=spath,
                             code_line=1,
                             claim=f"{os.path.basename(spath)} implements `{sub}`",
@@ -1519,8 +1542,9 @@ def run_checks(
                 repo=repo,
             )
         )
-    findings += check_paths(clone, ref, tree, basenames, docs, repo)
-    findings += check_flags(clone, ref, tree, docs, repo)
+    ignore = cfg.get("ignore_paths") or []
+    findings += check_paths(clone, ref, tree, basenames, docs, repo, ignore)
+    findings += check_flags(clone, ref, tree, docs, repo, ignore)
     findings += check_enumerations(clone, ref, cfg, docs_index, repo)
     findings += check_retired_names(clone, ref, cfg, scan_files, repo)
     findings += check_versions(clone, ref, tree, docs, label, repo, cfg)

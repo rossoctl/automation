@@ -42,11 +42,12 @@ source of that list.
 These rules are what keep a scan of this repo from turning into a list of
 false corrections.
 
-**Flags bind to one line.** A `--flag` is a claim about a script only when
-that script is named earlier on the same line, as in tool.sh followed by
---dry-run. A flag that appears before the script, as in a shellcheck
---severity invocation that later names a test file, is not a claim about
-that test. `--help`, `--version`, and the generic word `--flag` are not claims.
+**Flags bind to the nearest script before them on the same line.** A line
+that names two scripts and then a flag is a claim about the second script
+only. A flag that appears before any script, as in a shellcheck --severity
+invocation that later names a test file, is not a claim about that test.
+`--help`, `--version`, and the generic word `--flag` are not claims. Two
+identical lines are two findings.
 
 **Subcommands are the dispatcher.** The header list (`Subcommands:` /
 `Commands:`) is compared to the arms of `case "$1"` / `$cmd` / `$command` /
@@ -66,9 +67,14 @@ a repo-file extension (`.sh`, `.py`, `.md`, `.rst`, `.txt`, `.yml`, `.yaml`,
 `discord.accounts`, and `rossoctl/agent-skills` are not paths. A bare
 `link-health-fixer.sh` exists when any tree path has that basename. A slash
 path is a miss only when its first directory is in the tree and the rest is
-not. Host paths, bare runtime names, and a relative link that resolves to a
-real file are not misses. Path findings are `mechanical: false` because there
-is no replacement text.
+not. Before that miss is reported, the same citation is also tried relative
+to the document, so a bundled skill doc that says `scripts/org.sh` matches
+`skills/repoman/scripts/org.sh`. Host paths, bare runtime names, and a
+relative link that resolves to a real file are not misses. Extensions outside
+the list above (`.csv`, `.ini`, `.cfg`, `.conf`, `.js`, `.ts`, `.jsonl`) are
+not checked. Path findings are `mechanical: false` because there is no
+replacement text. `ignore_paths` drops path and flag findings in those
+documents, not only version and retired-name findings.
 
 ## Config schema (`.repoman/doc-drift.yaml`)
 
@@ -91,7 +97,7 @@ release:
 |---|---|
 | `boundary` | `main` (resolve `HEAD`) or `tags` (newest tag matching `stable_tag_pattern`) |
 | `stable_tag_pattern` | Regex for release tags. An invalid pattern is a `config` finding, not a crash |
-| `ignore_paths` | Glob-ish prefixes (a directory plus `/**`, or a trailing `*`) skipped by the version check |
+| `ignore_paths` | Glob-ish prefixes (a directory plus `/**`, or a trailing `*`) skipped by the version, retired-name, path, and flag checks |
 | `sources_of_truth` | List of `{name, code: {file, pattern}, docs: [paths]}`. `pattern` is a regex; group 1 is the captured token list. Longer than 256 characters or an invalid regex is a `config` finding |
 | `retired_names` | List of `{name, replace_with}`. `replace_with` may be empty |
 | `release.changelog` | Keep-a-Changelog path, default `CHANGELOG.md` |

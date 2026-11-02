@@ -19,6 +19,7 @@ fork and left for a human to merge.
 - Per-repo behavior comes from `.repoman/doc-drift.yaml`. When that file is
   absent, `sources_of_truth` and `retired_names` are empty (those checks are
   off) and `ignore_paths` defaults to CHANGELOG.md and docs/history/**.
+  Those paths skip version, retired-name, path, and flag findings.
   The schema is in `docs/specs/2026-11-02-doc-drift-design.md`.
 
 ### What NOT to Do
