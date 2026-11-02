@@ -507,6 +507,126 @@ else
   cat "$EDIT" || true
 fi
 
+# Precision: flags bind to the span that names the script, prose and inner
+# case arms are not subcommands, and a basename resolves to the tree.
+PREC="$TMP/prec"
+mkdir -p "$PREC/scripts" "$PREC/skills/repoman/scripts" "$PREC/docs"
+cat > "$PREC/scripts/program-lib.sh" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  --profile) ;;
+esac
+EOF
+cat > "$PREC/scripts/alpha.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/program-lib.sh"
+case "$1" in
+  --dry-run) ;;
+esac
+EOF
+cat > "$PREC/scripts/beta.sh" <<'EOF'
+#!/usr/bin/env bash
+echo beta
+EOF
+cat > "$PREC/scripts/x.sh" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  --only-scripts) ;;
+esac
+EOF
+cat > "$PREC/skills/repoman/scripts/x.sh" <<'EOF'
+#!/usr/bin/env bash
+echo other
+EOF
+cat > "$PREC/scripts/prose.sh" <<'EOF'
+#!/usr/bin/env bash
+# Subcommands: init-config
+case "$mode" in
+  central) ;;
+  same) ;;
+  end) ;;
+esac
+case "$1" in
+  init-config) ;;
+esac
+EOF
+cat > "$PREC/scripts/link-health-fixer.sh" <<'EOF'
+#!/usr/bin/env bash
+echo fixer
+EOF
+cat > "$PREC/README.md" <<'EOF'
+# Prec
+
+See `alpha.sh` and `beta.sh` for the scanners.
+
+- `--profile` selects an org profile.
+- `--org` names the org.
+
+Run `alpha.sh --dry-run` to preview.
+Run `beta.sh --dry-run` when that script has no such flag.
+`scripts/x.sh --only-scripts` names one of the two copies.
+The bare `x.sh --only-scripts` name is ambiguous.
+`alpha.sh` has no `--bogus` flag.
+EOF
+cat > "$PREC/docs/guide.md" <<'EOF'
+See `link-health-fixer.sh` in the scripts directory.
+
+Models such as `gemini-2.5-flash` and `discord.accounts` are not paths.
+The org repo is `rossoctl/agent-skills`.
+
+A dot [here](.) and [up](../README.md).
+
+Missing `scripts/missing.sh`.
+EOF
+git -C "$PREC" init -q
+git -C "$PREC" -c user.email=t@t -c user.name=t add -A
+git -C "$PREC" -c user.email=t@t -c user.name=t commit -qm "prec"
+OUTP="$TMP/outp.json"
+python3 "$CHECK" --clone "$PREC" --repo "fixture/prec" \
+  --releases '[]' --prs '[]' > "$OUTP"
+if jq -e '[.findings[] | select(.check=="flags" and (.claim|test("profile|org|only-scripts|bogus|Each|writes|central|same|\\bend\\b")))] | length == 0' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="flags" and .code_path=="scripts/beta.sh" and (.claim|test("dry-run")))] | length == 1' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="flags" and .doc_path=="scripts/prose.sh")] | length == 0' "$OUTP" >/dev/null; then
+  pass "flags: span binding ignores shared prose and inner case arms"
+else
+  fail_msg "flags: span binding"
+  jq '[.findings[] | select(.check=="flags")]' "$OUTP" || true
+fi
+if jq -e '[.findings[] | select(.check=="paths")] | length == 1' "$OUTP" >/dev/null \
+  && jq -e '[.findings[] | select(.check=="paths" and .mechanical==false and (.claim|test("scripts/missing.sh")))] | length == 1' "$OUTP" >/dev/null; then
+  pass "paths: basename resolves, non-paths and missing.sh only"
+else
+  fail_msg "paths: precision"
+  jq '[.findings[] | select(.check=="paths")]' "$OUTP" || true
+fi
+
+python3 - "$CHECK" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("ddprec", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = mod
+spec.loader.exec_module(mod)
+got = mod._list_command_tokens(
+    "init-config, add-repo, enable-program, set-output. Each writes"
+)
+assert got == ["init-config", "add-repo", "enable-program", "set-output"], got
+assert mod._list_command_tokens("Each writes a report") == []
+script = """
+# Subcommands: init-config
+case "$mode" in
+  central) ;;
+  same) ;;
+  end) ;;
+esac
+case "$subcommand" in
+  init-config) ;;
+  set-requirements) ;;
+esac
+"""
+assert mod._case_subcommands(script) == {"init-config", "set-requirements"}, mod._case_subcommands(script)
+PY
+pass "flags: prose header and dispatcher case"
+
 if [ "$fail" -ne 0 ]; then
   echo "FAILED"
   exit 1

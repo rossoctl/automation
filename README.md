@@ -31,6 +31,7 @@ reports/           (gitignored) Runtime data stays on remote host only
 | PR Review | `scripts/pr-review-scanner.sh` | `scripts/pr-review-fixer.sh` | Scanner finds PRs labeled for review; fixer performs the AI review (posts review + inline comments, advances the review-state label). `scripts/pr-review-impact.sh` measures time-to-merge impact |
 | Dependency Bump | `scripts/dep-bump-scanner.sh` | `scripts/dep-bump-fixer.sh` | Tracks and triages Dependabot PRs across repos (comments, closes stale, audits coverage) |
 | Health Dashboard | `scripts/automation-health-dashboard.sh` | — | Aggregates program run health into a dashboard |
+| Doc Drift | `scripts/doc-drift-scanner.sh` | `scripts/doc-drift-fixer.sh` | Checks a pinned ref for doc drift (paths, flags, enumerations, versions, changelog). See `docs/specs/2026-11-02-doc-drift-design.md` |
 
 Shared helpers live in `scripts/program-lib.sh`, a thin aggregator that sources four focused library modules (see [Library structure & portability](#library-structure--portability)). Repo coverage comes from the `config/core-repos.txt` allowlist via `get_core_repos()` (one **bare repo name** per line -- the owner is prepended from the active org; `#` comments and blank lines allowed) -- edit that file to change which repos are scanned.
 
@@ -50,7 +51,7 @@ bash scripts/repoman-run.sh <program> owner/name [owner/name ...]
 bash scripts/repoman-run.sh <program> --dry-run
 ```
 
-`<program>` is one of `link-health`, `dep-bump`, `pr-review`, `weekly-report`, `automation-health`, `repo-sync` (the full set is whatever `repoman-run.sh --help` lists). The orchestrator resolves the repo set, runs the capability check and clone refresh the program needs, execs it, and writes its `_index.json` entry — it is the **sole writer of `_index.json`**, so a program run directly (the commands in the table above) no longer updates the registry the dashboard reads. `repoman run <program>` is the blessed path for an indexed run.
+`<program>` is one of `link-health`, `dep-bump`, `pr-review`, `weekly-report`, `automation-health`, `repo-sync`, `doc-drift` (the full set is whatever `repoman-run.sh --help` lists). The orchestrator resolves the repo set, runs the capability check and clone refresh the program needs, execs it, and writes its `_index.json` entry — it is the **sole writer of `_index.json`**, so a program run directly (the commands in the table above) no longer updates the registry the dashboard reads. `repoman run <program>` is the blessed path for an indexed run.
 
 There is no `repoman` executable in this repo yet; `repoman run <program>` maps to `bash scripts/repoman-run.sh <program>`. In a RepoMan deployment the `/repoman` skill (in `rossoctl/agent-skills`) performs that mapping from a Claude Code / OpenClaw agent; scheduled DAM/OpenClaw jobs invoke the same command string. As of v0.1.0 that skill ships as a **self-contained plugin** that bundles this engine (the `scripts/` here are vendored into it), so the skill no longer assumes a checkout of this repo is present. Standing-orders that still call scanners directly are tracked for migration in [#118](https://github.com/rossoctl/automation/issues/118). See the run-path design in `docs/specs/` and the epic [#72](https://github.com/rossoctl/automation/issues/72).
 

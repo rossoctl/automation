@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -68,6 +69,31 @@ AUTOMATION_ONLY_RE = re.compile(
     re.I | re.S,
 )
 META_FLAGS = {"--help", "--version", "-h", "-v"}
+# A backtick or link is a path claim only with a repo-file extension or a
+# trailing slash. Version numbers, model ids, and owner/repo names are not.
+PATH_EXTS = frozenset({
+    ".sh", ".py", ".md", ".rst", ".txt", ".yml", ".yaml", ".json", ".toml", ".env",
+})
+# Tokens that match a command shape but are prose on a Subcommands: line.
+_PROSE_WORDS = frozenset({
+    "a", "an", "the", "each", "writes", "write", "its", "own", "then", "and",
+    "or", "see", "below", "with", "for", "from", "into", "this", "that",
+    "your", "also", "exactly", "one",
+})
+# Subcommand dispatcher, not an inner case on some other variable.
+_DISPATCH_CASE_RE = re.compile(
+    r"""(?x)
+    ^\s*case\s+
+    (?:
+        "\$\{?(?:1|cmd|command|subcommand)\}?(?::[^"]*)?"
+        |\$\{?(?:1|cmd|command|subcommand)\}?(?::[^\s]*)?
+    )
+    \s+in\s*(?:\#.*)?$
+    """
+)
+_SCRIPT_MENTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])((?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.(?:sh|py))\b"
+)
 
 OMIT_TYPES = {"docs", "chore", "test", "ci", "style"}
 BUCKET = {
@@ -388,14 +414,42 @@ def line_of_re(text: str, m: re.Match) -> int:
 # Checks
 # ---------------------------------------------------------------------------
 
+def _is_path_claim(raw: str) -> bool:
+    if not raw or raw in {".", ".."}:
+        return False
+    if raw.endswith("/"):
+        body = raw.rstrip("/")
+        return bool(body) and body not in {".", ".."}
+    return os.path.splitext(raw)[1].lower() in PATH_EXTS
+
+
+def _repo_relative(path: str) -> Optional[str]:
+    """Normalize a path and drop anything that escapes the repo root."""
+    norm = posixpath.normpath(path)
+    if norm in {".", ""}:
+        return ""
+    if norm == ".." or norm.startswith("../"):
+        return None
+    return norm
+
+
+def _in_tree(tree: Set[str], candidate: str) -> bool:
+    candidate = candidate.rstrip("/")
+    if not candidate:
+        return True
+    return any(p == candidate or p.startswith(candidate + "/") for p in tree)
+
+
 def check_paths(
     clone: str,
     ref: str,
     tree: Set[str],
+    basenames: Dict[str, List[str]],
     docs: List[Tuple[str, str]],
     repo: str,
 ) -> List[Finding]:
     findings: List[Finding] = []
+    top = {p.split("/", 1)[0] for p in tree}
     for doc_path, text in docs:
         doc_dir = os.path.dirname(doc_path)
         seen: Set[str] = set()
@@ -404,31 +458,54 @@ def check_paths(
                 raw = m.group(1)
                 if URLISH.match(raw) or raw.startswith("#"):
                     continue
-                # Skip pure identifiers without a slash or extension that look
-                # like code tokens, not paths (e.g. `repoman`).
-                if "/" not in raw and "." not in raw:
+                if not _is_path_claim(raw):
                     continue
                 if raw in seen:
                     continue
                 seen.add(raw)
-                candidates = []
-                if not raw.startswith("/"):
-                    candidates.append(raw)
-                    if doc_dir:
-                        candidates.append(f"{doc_dir}/{raw}")
+                candidates: List[str] = []
+                bare = "/" not in raw.strip("/")
+                if raw.startswith("/"):
+                    rel = _repo_relative(raw.lstrip("/"))
+                    if rel is None:
+                        continue
+                    if rel:
+                        candidates.append(rel)
+                elif raw.startswith("./") or raw.startswith("../"):
+                    # Resolve against the document. A link that climbs out of
+                    # the repo is not an in-repo claim.
+                    joined = f"{doc_dir}/{raw}" if doc_dir else raw
+                    rel = _repo_relative(joined)
+                    if rel is None:
+                        continue
+                    if rel:
+                        candidates.append(rel)
                 else:
-                    candidates.append(raw.lstrip("/"))
-                exists = any(
-                    any(p == c.rstrip("/") or p.startswith(c.rstrip("/") + "/") for p in tree)
-                    for c in candidates
-                )
-                if exists:
+                    rel = _repo_relative(raw)
+                    if rel is None:
+                        continue
+                    if rel:
+                        candidates.append(rel)
+                if any(_in_tree(tree, c) for c in candidates):
+                    continue
+                # A bare filename exists when any tree path has that basename.
+                if bare:
+                    base = os.path.basename(raw.rstrip("/"))
+                    if basenames.get(base):
+                        continue
+                    # A bare name that is not in the tree (`repos.json`,
+                    # `SKILL.md` in another repo) does not name a location here.
+                    continue
+                # A slash path is a claim only when its first directory is in
+                # this repo. `config/org.env` and `skills/foo/SKILL.md` are
+                # host or other-repo paths.
+                if not any("/" in c and c.split("/", 1)[0] in top for c in candidates):
                     continue
                 findings.append(
                     Finding(
                         check="paths",
                         kind="correction",
-                        mechanical=True,
+                        mechanical=False,
                         doc_path=doc_path,
                         doc_line=line_of_re(text, m),
                         code_path="(tree)",
@@ -442,37 +519,39 @@ def check_paths(
     return findings
 
 
-def extract_script_tokens(script_text: str) -> Set[str]:
-    tokens: Set[str] = set()
-    for m in FLAG_RE.finditer(script_text):
-        tokens.add(m.group(1))
-    # case arms:  foo|bar) or foo)
-    for m in re.finditer(r"(?m)^\s*([A-Za-z0-9_|-]+)\)\s*", script_text):
-        arm = m.group(1)
-        if arm in ("*", "*)") or arm.startswith("$"):
-            continue
-        for part in arm.split("|"):
-            part = part.strip()
-            if part and re.match(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", part):
-                tokens.add(part)
-    # usage() lines mentioning subcommands
-    for m in re.finditer(
-        r"(?m)^\s{0,4}([a-z][a-z0-9-]*)\s+--", script_text
-    ):
-        tokens.add(m.group(1))
-    return tokens
-
-
 def _add_subcommand_token(subs: Set[str], tok: str) -> None:
     if tok and tok.lower() not in _SUBCMD_STOPWORDS:
         subs.add(tok)
 
 
+def _list_command_tokens(text: str) -> List[str]:
+    """Command names from a list, stopping where prose starts.
+
+    ``init-config, add-repo, set-output. Each writes`` yields the three
+    commands. ``Each writes a report`` yields nothing. Backtick tokens, when
+    present, are the only ones taken.
+    """
+    ticks = re.findall(r"`([^`]+)`", text)
+    if ticks:
+        return [
+            t
+            for t in ticks
+            if re.fullmatch(r"[a-z][a-z0-9-]*", t) and t not in _PROSE_WORDS
+        ]
+    out: List[str] = []
+    for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]*", text):
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", word) or word in _PROSE_WORDS:
+            break
+        out.append(word)
+    return out
+
+
 def extract_listed_subcommands(text: str) -> Set[str]:
     """Collect subcommand tokens from a Subcommands:/Commands: list.
 
-    Accepts same-line tokens and subsequent indented ``- item`` bullets (with
-    optional backticks), so multi-line docs are not silently skipped.
+    Same-line text contributes command tokens until prose starts. Following
+    ``- item`` bullets and indented ``name --flag`` usage lines contribute
+    their command, not the description after it.
     """
     subs: Set[str] = set()
     lines = text.splitlines()
@@ -482,7 +561,7 @@ def extract_listed_subcommands(text: str) -> Set[str]:
             continue
         rest = (m.group("rest") or "").strip()
         if rest:
-            for tok in re.findall(r"[A-Za-z][A-Za-z0-9_-]*", rest):
+            for tok in _list_command_tokens(rest):
                 _add_subcommand_token(subs, tok)
         base_indent = len(line) - len(line.lstrip(" "))
         for j in range(i + 1, len(lines)):
@@ -498,10 +577,9 @@ def extract_listed_subcommands(text: str) -> Set[str]:
                 if nindent < base_indent:
                     break
                 item = stripped[2:].strip()
-                for bt, plain in re.findall(
-                    r"`([^`]+)`|([A-Za-z][A-Za-z0-9_-]*)", item
-                ):
-                    _add_subcommand_token(subs, bt or plain)
+                toks = _list_command_tokens(item)
+                if toks:
+                    _add_subcommand_token(subs, toks[0])
                 continue
             if nindent <= base_indent:
                 break
@@ -513,9 +591,13 @@ def extract_listed_subcommands(text: str) -> Set[str]:
                 _add_subcommand_token(subs, m2.group(1))
                 continue
             break
-    # Comment form: "#   foo --bar" without a Subcommands: header
+    # Usage comment with a command-shaped token: "# init-config --repos-dir".
+    # A prose comment such as "# explicit --live" or "# separate --repos" is not.
     for m in re.finditer(r"(?m)^#\s+([a-z][a-z0-9-]*)\s+--", text):
-        _add_subcommand_token(subs, m.group(1))
+        tok = m.group(1)
+        if "-" not in tok:
+            continue
+        _add_subcommand_token(subs, tok)
     return subs
 
 
@@ -525,17 +607,166 @@ def _header_subcommands(script_text: str) -> Set[str]:
 
 
 def _case_subcommands(script_text: str) -> Set[str]:
-    """Top-level case-arm tokens that look like subcommands (not flags)."""
+    """Arms of the subcommand dispatcher only.
+
+    The dispatcher is ``case "$1"`` / ``$cmd`` / ``$command`` / ``$subcommand``.
+    Arms of ``case "$mode"`` and other inner cases are not subcommands.
+    """
     subs: Set[str] = set()
-    for m in re.finditer(r"(?m)^\s*([A-Za-z0-9_|-]+)\)\s*", script_text):
-        arm = m.group(1)
-        if arm in ("*",) or arm.startswith("$"):
+    lines = script_text.splitlines()
+    i = 0
+    n = len(lines)
+    while i < n:
+        if not _DISPATCH_CASE_RE.match(lines[i]):
+            i += 1
             continue
-        for part in arm.split("|"):
-            part = part.strip()
-            if re.match(r"^[a-z][a-z0-9-]*$", part) and not part.startswith("-"):
-                subs.add(part)
+        depth = 1
+        i += 1
+        while i < n and depth:
+            line = lines[i]
+            if re.match(r"^\s*case\b.*\bin\b", line):
+                depth += 1
+            elif re.match(r"^\s*esac\b", line):
+                depth -= 1
+                if depth == 0:
+                    i += 1
+                    break
+            elif depth == 1:
+                arm_m = re.match(r"^\s*([A-Za-z0-9_|-]+)\)", line)
+                if arm_m:
+                    arm = arm_m.group(1)
+                    if arm != "*" and not arm.startswith("$"):
+                        for part in arm.split("|"):
+                            part = part.strip()
+                            if re.fullmatch(r"[a-z][a-z0-9-]*", part):
+                                subs.add(part)
+            i += 1
     return subs
+
+
+def _scripts_by_basename(tree: Set[str]) -> Dict[str, List[str]]:
+    by_base: Dict[str, List[str]] = {}
+    for p in tree:
+        if p.endswith(".sh") or p.endswith(".py"):
+            by_base.setdefault(os.path.basename(p), []).append(p)
+    for base in by_base:
+        by_base[base] = sorted(by_base[base])
+    return by_base
+
+
+def _resolve_script_mention(token: str, by_base: Dict[str, List[str]]) -> Optional[str]:
+    """Bind a doc citation to one script path.
+
+    A path with a slash must match that location. A bare basename binds only
+    when it is unique, so ``scripts/x.sh`` and ``skills/.../x.sh`` do not
+    collapse onto whichever file was inserted last.
+    """
+    token = token.lstrip("./")
+    base = os.path.basename(token)
+    paths = by_base.get(base) or []
+    if "/" in token:
+        for p in paths:
+            if p == token or p.endswith("/" + token):
+                return p
+        return None
+    if len(paths) == 1:
+        return paths[0]
+    return None
+
+
+def _sourced_shell_paths(script_text: str, by_base: Dict[str, List[str]]) -> List[str]:
+    """Shell files named by a leading ``source`` or ``.`` line."""
+    found: List[str] = []
+    seen: Set[str] = set()
+    for m in re.finditer(
+        r"(?m)^[ \t]*(?:source|\.)[ \t]+[\"']?(\S+)",
+        script_text,
+    ):
+        token = m.group(1).strip("'\"")
+        base = token.rsplit("/", 1)[-1]
+        if not base.endswith(".sh"):
+            continue
+        # $_LIB_DIR/core.sh is a basename. A concrete scripts/core.sh must match.
+        if "/" in token and not token.startswith("$"):
+            path = _resolve_script_mention(token.lstrip("./"), by_base)
+        else:
+            path = _resolve_script_mention(base, by_base)
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        found.append(path)
+    return found
+
+
+def _accepted_flags(
+    script_text: str,
+    by_base: Dict[str, List[str]],
+    show,
+) -> Set[str]:
+    """Long options in this script plus the libs it sources.
+
+    ``program-lib.sh`` is followed one more level so flags defined in the
+    modules it aggregates count for every program script.
+    """
+    flags = set(FLAG_RE.findall(script_text))
+    queue = _sourced_shell_paths(script_text, by_base)
+    seen: Set[str] = set()
+    i = 0
+    while i < len(queue):
+        sp = queue[i]
+        i += 1
+        if sp in seen:
+            continue
+        seen.add(sp)
+        text = show(sp)
+        if not text:
+            continue
+        flags |= set(FLAG_RE.findall(text))
+        if os.path.basename(sp) == "program-lib.sh":
+            for child in _sourced_shell_paths(text, by_base):
+                if child not in seen:
+                    queue.append(child)
+    return flags - META_FLAGS
+
+
+def _doc_spans(text: str) -> List[str]:
+    """Non-empty lines. A flag binds only to scripts named on that same line.
+
+    Fence markers are not spans. A multi-line bullet does not carry a script
+    mention on the first line onto flags written on the continuation: those
+    flags name whichever script is on their own line.
+    """
+    spans: List[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            continue
+        if line.strip():
+            spans.append(line)
+    return spans
+
+
+def _line_in_span(text: str, span: str, needle: str) -> int:
+    idx = text.find(span)
+    local = span.find(needle)
+    if idx < 0 or local < 0:
+        return line_of(text, needle)
+    return text[: idx + local].count("\n") + 1
+
+
+def _subcommand_after_mention(span: str, end: int) -> Optional[str]:
+    """A usage token after a script, not the next word of a sentence.
+
+    ``script.sh `set-output` `` and ``script.sh set-output --flag`` count.
+    ``script.sh measures`` does not.
+    """
+    rest = span[end:]
+    m = re.match(r"`?[ \t]+`([a-z][a-z0-9-]*)`", rest)
+    if m and m.group(1) not in _PROSE_WORDS and m.group(1) not in _SUBCMD_STOPWORDS:
+        return m.group(1)
+    m = re.match(r"`?[ \t]+([a-z][a-z0-9-]*)\b[ \t]+--", rest)
+    if m and "-" in m.group(1):
+        return m.group(1)
+    return None
 
 
 def check_flags(
@@ -546,100 +777,122 @@ def check_flags(
     repo: str,
 ) -> List[Finding]:
     findings: List[Finding] = []
-    scripts = {
-        os.path.basename(p): p
-        for p in tree
-        if p.endswith(".sh") or p.endswith(".py")
-    }
+    by_base = _scripts_by_basename(tree)
+    shown: Dict[str, Optional[str]] = {}
 
-    # Intra-script: header subcommand list vs case arms (the set-requirements case).
-    for spath in sorted(set(scripts.values())):
-        script_text = git_show(clone, ref, spath)
-        if script_text is None:
-            continue
-        header = _header_subcommands(script_text)
-        cases = _case_subcommands(script_text)
-        if not header:
-            continue
-        for sub in sorted(cases - header):
-            findings.append(
-                Finding(
-                    check="flags",
-                    kind="addition",
-                    mechanical=True,
-                    doc_path=spath,
-                    doc_line=1,
-                    code_path=spath,
-                    code_line=line_of(script_text, sub) if sub in script_text else 1,
-                    claim=f"document subcommand `{sub}`",
-                    evidence=f"`{sub}` in case arms of {spath} but absent from header list",
-                    repo=repo,
-                    draft=sub,
-                )
-            )
-        for sub in sorted(header - cases):
-            findings.append(
-                Finding(
-                    check="flags",
-                    kind="correction",
-                    mechanical=False,
-                    doc_path=spath,
-                    doc_line=line_of(script_text, sub),
-                    code_path=spath,
-                    code_line=1,
-                    claim=f"{os.path.basename(spath)} implements `{sub}`",
-                    evidence=f"`{sub}` listed in header but not in case arms of {spath}",
-                    repo=repo,
-                )
-            )
+    def show(path: str) -> Optional[str]:
+        if path not in shown:
+            shown[path] = git_show(clone, ref, path)
+        return shown[path]
 
-    for doc_path, text in docs:
-        named: List[str] = []
-        for base, spath in scripts.items():
-            if f"`{base}`" in text or base in text:
-                named.append(spath)
-        if not named:
-            continue
-        for spath in named:
-            script_text = git_show(clone, ref, spath)
+    # Intra-script: header list vs the dispatcher (the set-requirements case).
+    for paths in by_base.values():
+        for spath in paths:
+            if spath.startswith("tests/") or "/tests/" in spath:
+                continue
+            script_text = show(spath)
             if script_text is None:
                 continue
-            parsed = extract_script_tokens(script_text)
-            doc_flags = set(FLAG_RE.findall(text)) - META_FLAGS
-            doc_sub = extract_listed_subcommands(text)
-            for m in re.finditer(r"(?m)^\s{2,}([a-z][a-z0-9-]*)\s+--", text):
-                doc_sub.add(m.group(1))
-
-            for flag in sorted(doc_flags - parsed):
+            header = _header_subcommands(script_text)
+            cases = _case_subcommands(script_text)
+            if not header:
+                continue
+            for sub in sorted(cases - header):
                 findings.append(
                     Finding(
                         check="flags",
-                        kind="correction",
-                        mechanical=False,
-                        doc_path=doc_path,
-                        doc_line=line_of(text, flag),
+                        kind="addition",
+                        mechanical=True,
+                        doc_path=spath,
+                        doc_line=1,
                         code_path=spath,
-                        code_line=1,
-                        claim=f"{os.path.basename(spath)} accepts `{flag}`",
-                        evidence=f"`{flag}` not found in parser of {spath}",
+                        code_line=line_of(script_text, sub) if sub in script_text else 1,
+                        claim=f"document subcommand `{sub}`",
+                        evidence=f"`{sub}` in case arms of {spath} but absent from header list",
                         repo=repo,
+                        draft=sub,
                     )
                 )
-            for sub in sorted(doc_sub - parsed):
+            for sub in sorted(header - cases):
                 findings.append(
                     Finding(
                         check="flags",
                         kind="correction",
                         mechanical=False,
-                        doc_path=doc_path,
-                        doc_line=line_of(text, sub),
+                        doc_path=spath,
+                        doc_line=line_of(script_text, sub),
                         code_path=spath,
                         code_line=1,
                         claim=f"{os.path.basename(spath)} implements `{sub}`",
-                        evidence=f"`{sub}` listed in docs but not in parser of {spath}",
+                        evidence=f"`{sub}` listed in header but not in case arms of {spath}",
                         repo=repo,
                     )
                 )
+
+    for doc_path, text in docs:
+        for span in _doc_spans(text):
+            mentions: List[Tuple[int, str]] = []
+            seen_paths: Set[str] = set()
+            for m in _SCRIPT_MENTION_RE.finditer(span):
+                if re.search(r"https?://\S*$", span[: m.start()]):
+                    continue
+                spath = _resolve_script_mention(m.group(1), by_base)
+                if not spath or spath in seen_paths:
+                    continue
+                seen_paths.add(spath)
+                mentions.append((m.end(), spath))
+            if not mentions:
+                continue
+            # A flag belongs to the script named before it on this line
+            # (`tool.sh --dry-run`). A flag that appears first belongs to
+            # whatever command preceded the script (`shellcheck --severity`
+            # then a test path). `--flag` is the generic word, not an option.
+            flag_at = []
+            for m in FLAG_RE.finditer(span):
+                if m.group(1) in META_FLAGS or m.group(1) == "--flag":
+                    continue
+                # "no --repos flag" is a denial, not a claim the script accepts it.
+                prefix = span[max(0, m.start() - 40) : m.start()]
+                if re.search(r"\b(?:no|not|without)\b", prefix, re.I):
+                    continue
+                flag_at.append(m)
+            for _end, spath in mentions:
+                script_text = show(spath)
+                if script_text is None:
+                    continue
+                accepted = _accepted_flags(script_text, by_base, show)
+                span_flags = {m.group(1) for m in flag_at if m.start() >= _end}
+                for flag in sorted(span_flags - accepted):
+                    findings.append(
+                        Finding(
+                            check="flags",
+                            kind="correction",
+                            mechanical=False,
+                            doc_path=doc_path,
+                            doc_line=_line_in_span(text, span, flag),
+                            code_path=spath,
+                            code_line=1,
+                            claim=f"{os.path.basename(spath)} accepts `{flag}`",
+                            evidence=f"`{flag}` not found in parser of {spath}",
+                            repo=repo,
+                        )
+                    )
+                sub = _subcommand_after_mention(span, _end)
+                if sub and sub not in _case_subcommands(script_text):
+                    findings.append(
+                        Finding(
+                            check="flags",
+                            kind="correction",
+                            mechanical=False,
+                            doc_path=doc_path,
+                            doc_line=_line_in_span(text, span, sub),
+                            code_path=spath,
+                            code_line=1,
+                            claim=f"{os.path.basename(spath)} implements `{sub}`",
+                            evidence=f"`{sub}` listed in docs but not in parser of {spath}",
+                            repo=repo,
+                        )
+                    )
     return findings
 
 
@@ -743,7 +996,7 @@ def check_enumerations(
                     Finding(
                         check="enumerations",
                         kind="correction",
-                        mechanical=True,
+                        mechanical=False,
                         doc_path=dpath,
                         doc_line=line_of(dtext, extra),
                         code_path=cfile,
@@ -1266,7 +1519,7 @@ def run_checks(
                 repo=repo,
             )
         )
-    findings += check_paths(clone, ref, tree, docs, repo)
+    findings += check_paths(clone, ref, tree, basenames, docs, repo)
     findings += check_flags(clone, ref, tree, docs, repo)
     findings += check_enumerations(clone, ref, cfg, docs_index, repo)
     findings += check_retired_names(clone, ref, cfg, scan_files, repo)
