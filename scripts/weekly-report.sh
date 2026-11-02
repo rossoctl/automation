@@ -52,7 +52,7 @@ OPTIONS:
   --help, -h         Show this help
 
 ENVIRONMENT:
-  REPORT_PY          Path to report.py (default: the deployed report generator)
+  REPORT_PY          Path to report.py (default: the bundled generator beside this skill)
 
 PREREQUISITES:
   python3, gh (authenticated). The repo list comes from the RepoMan enrolled set
@@ -74,9 +74,11 @@ if [ -z "$repos" ]; then
   exit 1
 fi
 
-# Locate the generator. Default points at the deployed github-weekly-report skill
-# (the upstream skill name in agent-skills); override with REPORT_PY in dev.
-REPORT_PY="${REPORT_PY:-$HOME/workspaces/shared/skills/github-weekly-report/scripts/report.py}"
+# Locate the generator. Default is relative to this wrapper: in the bundled
+# plugin layout the github-weekly-report skill sits beside the repoman skill, so
+# ../../github-weekly-report/scripts/report.py resolves to the bundled copy.
+# Override with REPORT_PY for other layouts (e.g. the OpenClaw deployment).
+REPORT_PY="${REPORT_PY:-$SCRIPT_DIR/../../github-weekly-report/scripts/report.py}"
 if [ ! -f "$REPORT_PY" ]; then
   echo "Error: report generator not found at: $REPORT_PY" >&2
   echo "Set REPORT_PY to the path of report.py." >&2

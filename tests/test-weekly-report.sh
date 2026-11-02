@@ -78,5 +78,23 @@ if REPOMAN_REPOS_FILE="$TEST_TMPDIR/empty.json" \
   echo "FAIL wrapper should error on empty enrolled set"; fail=1
 fi
 
+# REPORT_PY default is resolved RELATIVE TO THE WRAPPER (the bundled generator
+# at ../../github-weekly-report/scripts/report.py), not a host-specific
+# $HOME/workspaces path (rossoctl/automation#126). With REPORT_PY unset and the
+# bundled copy absent (automation has the wrapper but not report.py), the
+# "not found" error must name the wrapper-relative path and must NOT name a
+# $HOME/workspaces path.
+expected_default="$(cd "$SCRIPT_DIR/../scripts" && pwd)/../../github-weekly-report/scripts/report.py"
+err=$(REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+      bash "$WRAPPER" --output "$TEST_TMPDIR/x.md" 2>&1 >/dev/null) || true
+case "$err" in
+  *"workspaces/shared"*)
+    echo "FAIL default still points at the OpenClaw \$HOME/workspaces path: [$err]"; fail=1 ;;
+  *github-weekly-report/scripts/report.py*)
+    : ;;  # names the bundle-relative generator — correct
+  *)
+    echo "FAIL default error names neither the bundle path nor workspaces: [$err]"; fail=1 ;;
+esac
+
 if [ "$fail" -eq 0 ]; then echo "PASS test-weekly-report.sh"; fi
 exit "$fail"
