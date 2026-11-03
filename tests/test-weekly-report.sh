@@ -100,9 +100,9 @@ case "$err" in
     echo "FAIL default error does not name the bundled generator: [$err]"; fail=1 ;;
 esac
 
-# Positive path (P2, clawgenti/Jim #127): a real bundle layout with the generator
-# present and REPORT_PY unset must FIND it, run it, and emit the report — proving
-# the acceptance criterion "succeeds on a clean plugin install", not just the error.
+# Positive path (candidate 1, bundled — #127): a real bundle layout with the
+# generator present and REPORT_PY unset must FIND it, run it, and emit the report
+# — proving "succeeds on a clean plugin install", not just the error.
 bundle="$TEST_TMPDIR/bundle"
 mkdir -p "$bundle/skills/repoman/scripts" "$bundle/skills/github-weekly-report/scripts"
 cp "$SCRIPT_DIR/../scripts/"*.sh "$bundle/skills/repoman/scripts/"
@@ -117,6 +117,20 @@ full=$(HOME="$TEST_TMPDIR/nohome" REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
 got=$(printf '%s\n' "$full" | head -n 1)
 [ "$got" = "RAN --repos rossoctl/alpha alice/beta" ] \
   || { echo "FAIL bundled default not found/run (REPORT_PY unset): [$got]"; fail=1; }
+
+# Positive path (candidate 2, deployed fallback — #127): bundled copy ABSENT,
+# the $HOME/workspaces copy present. Proves the OpenClaw layout still resolves
+# with REPORT_PY unset, so dropping or reordering the fallback candidate fails here.
+rm "$bundle/skills/github-weekly-report/scripts/report.py"
+mkdir -p "$TEST_TMPDIR/home/workspaces/shared/skills/github-weekly-report/scripts"
+printf 'import sys\nprint("RAN", " ".join(sys.argv[1:]))\n' \
+  > "$TEST_TMPDIR/home/workspaces/shared/skills/github-weekly-report/scripts/report.py"
+full=$(HOME="$TEST_TMPDIR/home" REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+       REPOMAN_SKILL_DIR="$TEST_TMPDIR/meta" \
+       bash "$bundle/skills/repoman/scripts/weekly-report.sh" 2>/dev/null) || true
+got=$(printf '%s\n' "$full" | head -n 1)
+[ "$got" = "RAN --repos rossoctl/alpha alice/beta" ] \
+  || { echo "FAIL deployed fallback not used (REPORT_PY unset): [$got]"; fail=1; }
 
 if [ "$fail" -eq 0 ]; then echo "PASS test-weekly-report.sh"; fi
 exit "$fail"

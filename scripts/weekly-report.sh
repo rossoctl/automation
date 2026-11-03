@@ -52,7 +52,8 @@ OPTIONS:
   --help, -h         Show this help
 
 ENVIRONMENT:
-  REPORT_PY          Path to report.py (default: the bundled generator beside this skill)
+  REPORT_PY          Path to report.py (default: first of the bundled generator
+                     beside this skill, then the $HOME/workspaces deploy path)
 
 PREREQUISITES:
   python3, gh (authenticated). The repo list comes from the RepoMan enrolled set
@@ -84,7 +85,7 @@ fi
 # If neither exists, keep the bundled path so the error names the expected location.
 if [ -z "${REPORT_PY:-}" ]; then
   bundled="$SCRIPT_DIR/../../github-weekly-report/scripts/report.py"
-  deployed="$HOME/workspaces/shared/skills/github-weekly-report/scripts/report.py"
+  deployed="${HOME:-}/workspaces/shared/skills/github-weekly-report/scripts/report.py"
   for candidate in "$bundled" "$deployed"; do
     if [ -f "$candidate" ]; then REPORT_PY="$candidate"; break; fi
   done
