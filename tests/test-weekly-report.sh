@@ -78,5 +78,59 @@ if REPOMAN_REPOS_FILE="$TEST_TMPDIR/empty.json" \
   echo "FAIL wrapper should error on empty enrolled set"; fail=1
 fi
 
+# REPORT_PY default is resolved RELATIVE TO THE WRAPPER (the bundled generator
+# at ../../github-weekly-report/scripts/report.py), not a host-specific
+# $HOME/workspaces path (rossoctl/automation#126). With REPORT_PY unset and the
+# bundled copy absent (automation has the wrapper but not report.py), the
+# "not found" error must name the wrapper-relative path and must NOT name a
+# $HOME/workspaces path.
+# Assert the PROPERTY, not an exact recomputed path: with no bundled generator
+# present (automation ships the wrapper, not report.py) and no $HOME/workspaces
+# copy, the error names the bundled github-weekly-report generator and never a
+# workspaces path. A property check (not an exact string) keeps this green across
+# the candidate-list resolution order.
+err=$(HOME="$TEST_TMPDIR/nohome" REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+      bash "$WRAPPER" --output "$TEST_TMPDIR/x.md" 2>&1 >/dev/null) || true
+case "$err" in
+  *workspaces*)
+    echo "FAIL default error still names a \$HOME/workspaces path: [$err]"; fail=1 ;;
+  *github-weekly-report/scripts/report.py*)
+    : ;;  # names the bundled generator — correct
+  *)
+    echo "FAIL default error does not name the bundled generator: [$err]"; fail=1 ;;
+esac
+
+# Positive path (candidate 1, bundled — #127): a real bundle layout with the
+# generator present and REPORT_PY unset must FIND it, run it, and emit the report
+# — proving "succeeds on a clean plugin install", not just the error.
+bundle="$TEST_TMPDIR/bundle"
+mkdir -p "$bundle/skills/repoman/scripts" "$bundle/skills/github-weekly-report/scripts"
+cp "$SCRIPT_DIR/../scripts/"*.sh "$bundle/skills/repoman/scripts/"
+printf 'import sys\nprint("RAN", " ".join(sys.argv[1:]))\n' \
+  > "$bundle/skills/github-weekly-report/scripts/report.py"
+# Capture full output first, then take line 1 — piping the wrapper directly into
+# `head` makes head close the pipe early, and under `set -o pipefail` the SIGPIPE
+# surfaces as exit 141 even though the assertion is fine.
+full=$(HOME="$TEST_TMPDIR/nohome" REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+       REPOMAN_SKILL_DIR="$TEST_TMPDIR/meta" \
+       bash "$bundle/skills/repoman/scripts/weekly-report.sh" 2>/dev/null)
+got=$(printf '%s\n' "$full" | head -n 1)
+[ "$got" = "RAN --repos rossoctl/alpha alice/beta" ] \
+  || { echo "FAIL bundled default not found/run (REPORT_PY unset): [$got]"; fail=1; }
+
+# Positive path (candidate 2, deployed fallback — #127): bundled copy ABSENT,
+# the $HOME/workspaces copy present. Proves the OpenClaw layout still resolves
+# with REPORT_PY unset, so dropping or reordering the fallback candidate fails here.
+rm "$bundle/skills/github-weekly-report/scripts/report.py"
+mkdir -p "$TEST_TMPDIR/home/workspaces/shared/skills/github-weekly-report/scripts"
+printf 'import sys\nprint("RAN", " ".join(sys.argv[1:]))\n' \
+  > "$TEST_TMPDIR/home/workspaces/shared/skills/github-weekly-report/scripts/report.py"
+full=$(HOME="$TEST_TMPDIR/home" REPOMAN_REPOS_FILE="$TEST_TMPDIR/repos.json" \
+       REPOMAN_SKILL_DIR="$TEST_TMPDIR/meta" \
+       bash "$bundle/skills/repoman/scripts/weekly-report.sh" 2>/dev/null) || true
+got=$(printf '%s\n' "$full" | head -n 1)
+[ "$got" = "RAN --repos rossoctl/alpha alice/beta" ] \
+  || { echo "FAIL deployed fallback not used (REPORT_PY unset): [$got]"; fail=1; }
+
 if [ "$fail" -eq 0 ]; then echo "PASS test-weekly-report.sh"; fi
 exit "$fail"
