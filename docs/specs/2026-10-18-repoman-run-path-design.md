@@ -461,10 +461,12 @@ leans on the capability gate).
   remove the hardcoded org/person defaults — `REPORT_TARGET_REPO` and
   `SOURCE_REPO` in `link-health-scanner.sh` / `automation-health-dashboard.sh`,
   the committer identity in `link-health-fixer.sh`, and the personal `REPORT_PY`
-  default in `weekly-report.sh` (already env-overridable). 4 behavioral
-  constants across 3 files. #116 carries the authoritative per-line locations;
-  distinct from #99 (that is config *plumbing*; this is embedded org/person
-  *defaults*).
+  **fallback** in `weekly-report.sh` (already env-overridable). As of #127 that
+  wrapper resolves `REPORT_PY` from a candidate list — the bundled plugin path
+  first, the personal `$HOME/workspaces/...` path only as a fallback — so #116's
+  remaining task here is dropping that fallback candidate, not the whole default.
+  #116 carries the authoritative per-line locations; distinct from #99 (that is
+  config *plumbing*; this is embedded org/person *defaults*).
 - **#99** — scanner/fixer/dashboard param-driven decoupling (v0.1.1).
 - **#82** — automation commit/sign-off identity (gates fixer orchestration).
 - **#76** — unify program registry.
