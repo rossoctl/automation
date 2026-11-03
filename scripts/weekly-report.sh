@@ -74,11 +74,22 @@ if [ -z "$repos" ]; then
   exit 1
 fi
 
-# Locate the generator. Default is relative to this wrapper: in the bundled
-# plugin layout the github-weekly-report skill sits beside the repoman skill, so
-# ../../github-weekly-report/scripts/report.py resolves to the bundled copy.
-# Override with REPORT_PY for other layouts (e.g. the OpenClaw deployment).
-REPORT_PY="${REPORT_PY:-$SCRIPT_DIR/../../github-weekly-report/scripts/report.py}"
+# Locate the generator. When REPORT_PY is unset, try candidates in order and use
+# the first that exists, so both deployment layouts work with no per-host config:
+#   1. bundled  — the plugin layout, where github-weekly-report sits beside the
+#                 repoman skill (the self-contained install; the primary target).
+#   2. deployed — the OpenClaw host layout under $HOME/workspaces. Transitional:
+#                 the personal-path default is tracked for removal in #116, and
+#                 falls away entirely if OpenClaw deployment is retired.
+# If neither exists, keep the bundled path so the error names the expected location.
+if [ -z "${REPORT_PY:-}" ]; then
+  bundled="$SCRIPT_DIR/../../github-weekly-report/scripts/report.py"
+  deployed="$HOME/workspaces/shared/skills/github-weekly-report/scripts/report.py"
+  for candidate in "$bundled" "$deployed"; do
+    if [ -f "$candidate" ]; then REPORT_PY="$candidate"; break; fi
+  done
+  REPORT_PY="${REPORT_PY:-$bundled}"
+fi
 if [ ! -f "$REPORT_PY" ]; then
   echo "Error: report generator not found at: $REPORT_PY" >&2
   echo "Set REPORT_PY to the path of report.py." >&2
