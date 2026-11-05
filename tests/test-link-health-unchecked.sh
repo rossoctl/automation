@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Unchecked (egress refusal) must never open or auto-close issues.
-# Drives the real link-health-scanner.sh with gh + lychee stubbed.
+# Drives the real link-health-scanner.sh with gh + lychee (and, for the
+# crash-containment case, python3) stubbed.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCANNER="$SCRIPT_DIR/../scripts/link-health-scanner.sh"
@@ -178,5 +179,57 @@ if [ "$still_broken" = "1" ]; then
 else
   echo "FAIL: case2 lost the prior broken record (still_broken=$still_broken)"; fail=1
 fi
+
+# --- Case 3: a crashing python checker must fail the repo, not the run ---
+: > "$CREATE_LOG"
+: > "$CLOSE_LOG"
+rm -f "$REPORTS/latest.json"
+
+# Emulates link-check.py dying mid-write: truncated JSON on stdout, exit 0.
+# Before the JSON-validity guard this killed the whole scanner via set -e
+# on the jq reads; it must instead count the repo as failed and continue.
+cat > "$BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+printf '{"total": '
+exit 0
+STUB
+chmod +x "$BIN/python3"
+
+REPORTS_DIR="$REPORTS" LINK_CHECKER=python PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
+
+rf=$(jq '.repos_failed // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$rf" = "1" ]; then
+  echo "PASS: case3 truncated checker JSON fails the repo, not the run"
+else
+  echo "FAIL: case3 repos_failed=$rf (expected 1)"; fail=1
+fi
+
+rs=$(jq '.repos_scanned // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$rs" = "0" ]; then
+  echo "PASS: case3 truncated-JSON repo not counted as scanned"
+else
+  echo "FAIL: case3 repos_scanned=$rs (expected 0)"; fail=1
+fi
+
+# A non-zero python checker exit is fatal for the repo even with valid JSON
+# (link-check.py exits 0 unless it crashed).
+cat > "$BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+printf '{"total": 0, "errors": 0, "unchecked": 0, "error_map": {}}\n'
+exit 3
+STUB
+chmod +x "$BIN/python3"
+rm -f "$REPORTS/latest.json"
+
+REPORTS_DIR="$REPORTS" LINK_CHECKER=python PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
+
+rf=$(jq '.repos_failed // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$rf" = "1" ]; then
+  echo "PASS: case3 non-zero checker exit fails the repo"
+else
+  echo "FAIL: case3 repos_failed=$rf (expected 1)"; fail=1
+fi
+
+rm -f "$BIN/python3"
 
 [ "$fail" -eq 0 ] && echo "PASS" || { echo "FAILURES"; exit 1; }
