@@ -24,7 +24,7 @@ Usage: doc-drift-precheck.sh [--repo owner/name] [--worklist /path]
 Run the deterministic doc-drift checker. Exit 1 when the worklist is empty;
 exit 0 and print "worklist: <path>" when it is not. The printed path persists
 after the run. --worklist overrides the default of
-\${REPORTS_DIR:-\$HOME/reports/doc-drift}/worklist.json. Fetch failures are
+${REPORTS_DIR:-$HOME/reports/doc-drift}/worklist.json. Fetch failures are
 fail-open (exit 2) so a broken gate does not block the run.
 EOF
       exit 0

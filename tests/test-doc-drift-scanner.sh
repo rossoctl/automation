@@ -300,7 +300,7 @@ if [ "$rc5" -eq 0 ]; then
 else
   fail_msg "case5: --issue-limit exit $rc5"
 fi
-c5creates=$(grep -c "issue create" "$C5_LOG" 2>/dev/null || echo 0)
+c5creates=$(grep -c "issue create" "$C5_LOG" 2>/dev/null || true)
 if [ "${c5creates:-0}" -le 1 ]; then
   pass "case5: at most one issue create with --issue-limit 1 (got $c5creates)"
 else
