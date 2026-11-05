@@ -122,6 +122,40 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Bare run (no --worklist): the default worklist path MUST persist after the
+# script returns. Regression for #130 — the old default lived in the per-run
+# temp dir that setup_workspace's EXIT trap deletes, so the printed path was
+# already gone (dangling) by the time the caller read it.
+# ---------------------------------------------------------------------------
+# Still on the drift fixture (repos.json = fixture/drift, findings present).
+WL_DEFAULT_REPORTS="$TMP/reports-default"
+set +e
+out_bare=$(REPORTS_DIR="$WL_DEFAULT_REPORTS" bash "$PRECHECK" 2>/dev/null)
+rc_bare=$?
+set -e
+if [ "$rc_bare" -eq 0 ]; then
+  pass "precheck exit 0 on bare run with findings"
+else
+  fail_msg "precheck bare run expected exit 0, got $rc_bare (out=$out_bare)"
+fi
+case "$out_bare" in
+  "worklist: "*) pass "precheck bare run prints a worklist: line" ;;
+  *) fail_msg "precheck bare run did not print worklist: [$out_bare]" ;;
+esac
+# The printed path must still exist AFTER the script returned (the bug: it did not).
+bare_path=${out_bare#worklist: }
+if [ -n "$bare_path" ] && [ -f "$bare_path" ]; then
+  pass "default worklist path persists after the script returns"
+else
+  fail_msg "default worklist path does not exist after return (dangling): [$bare_path]"
+fi
+# And it must NOT point inside a /tmp per-run temp dir that gets reaped.
+case "$bare_path" in
+  *doc-drift-precheck-*/worklist.json) fail_msg "default worklist still points into the reaped temp dir: [$bare_path]" ;;
+  *) pass "default worklist is not in the reaped per-run temp dir" ;;
+esac
+
+# ---------------------------------------------------------------------------
 # Syntax + fixer fail-closed
 # ---------------------------------------------------------------------------
 bash -n "$PRECHECK" && pass "precheck bash -n" || fail_msg "precheck bash -n"
