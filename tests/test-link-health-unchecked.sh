@@ -55,7 +55,9 @@ printf '[{"owner":"alice","name":"a"}]\n' > "$REPOMAN_REPOS_FILE"
 REPORTS="$TEST_TMPDIR/reports/link-health"; mkdir -p "$REPORTS"
 
 # --- Case 1: unchecked never opens an issue; 404 does ---
-REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
+# Pinned to LINK_CHECKER=lychee: this case exercises the checker-agnostic
+# split/re-injection logic via the lychee stub (the default is python).
+REPORTS_DIR="$REPORTS" LINK_CHECKER=lychee PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
 
 created=$(grep -c "CREATE" "$CREATE_LOG" 2>/dev/null || true)
 created=${created:-0}
@@ -153,7 +155,7 @@ esac
 STUB
 chmod +x "$BIN/gh"
 
-REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
+REPORTS_DIR="$REPORTS" LINK_CHECKER=lychee PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
 
 closed=$(grep -c "CLOSE" "$CLOSE_LOG" 2>/dev/null || true)
 closed=${closed:-0}
@@ -231,5 +233,59 @@ else
 fi
 
 rm -f "$BIN/python3"
+
+# --- Case 4: the default checker is python (real link-check.py, no stub) ---
+: > "$CREATE_LOG"
+: > "$CLOSE_LOG"
+rm -f "$REPORTS/latest.json" "$REPORTS/history.json"
+
+# A malformed URL: a deterministic error that needs no network, so the case
+# cannot flap with proxy/DNS conditions (an unresolvable host behind an
+# egress proxy surfaces as an accepted 502, for example).
+printf 'Docs: see http://[::1 for internals.\n' > "$REPOS_ROOT/alice/a/README.md"
+
+# No pre-existing issues (the case-2 stub reports issue 9 for every search).
+cat > "$BIN/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  *"issue create"*) echo "CREATE \$*" >> "$CREATE_LOG"; echo "https://github.com/alice/a/issues/3"; exit 0 ;;
+  *"issue close"*)  echo "CLOSE \$*" >> "$CLOSE_LOG"; exit 0 ;;
+  *"issue list"*)   exit 0 ;;
+  *"search"*)       exit 0 ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$BIN/gh"
+
+# No LINK_CHECKER in the environment: the scanner must default to python.
+REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" env -u LINK_CHECKER bash "$SCANNER" >/dev/null 2>&1
+
+rf=$(jq '.repos_failed // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$rf" = "0" ]; then
+  echo "PASS: case4 default python checker scanned the repo cleanly"
+else
+  echo "FAIL: case4 repos_failed=$rf (expected 0)"; fail=1
+fi
+
+rs=$(jq '.repos_scanned // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$rs" = "1" ]; then
+  echo "PASS: case4 repo counted as scanned"
+else
+  echo "FAIL: case4 repos_scanned=$rs (expected 1)"; fail=1
+fi
+
+malformed=$(jq --arg u "http://[::1" '[.broken[] | select(.url == $u)] | length' \
+  "$REPORTS/latest.json" 2>/dev/null || echo 0)
+if [ "$malformed" = "1" ]; then
+  echo "PASS: case4 malformed URL reported as broken"
+else
+  echo "FAIL: case4 malformed URL missing from broken[]"; fail=1
+fi
+
+if grep -Fq "http://[::1" "$CREATE_LOG"; then
+  echo "PASS: case4 issue filed for the malformed URL"
+else
+  echo "FAIL: case4 create log missing the malformed URL"; fail=1
+fi
 
 [ "$fail" -eq 0 ] && echo "PASS" || { echo "FAILURES"; exit 1; }
