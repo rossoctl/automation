@@ -37,20 +37,69 @@ SCAN_EXTENSIONS = {".md", ".markdown", ".html", ".htm"}
 
 # --- TOML subset (exclude / exclude_path / accept) ---------------------------------
 
+def _strip_toml_comment(line: str) -> str:
+    """Cut the line at the first '#' outside a quoted string.
+
+    A '#' inside an exclude regex (e.g. "...page#section") is a literal
+    character, not a comment.
+    """
+    quote = None
+    for i, ch in enumerate(line):
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in ('"', "'"):
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+    return line
+
+
+def _bracket_depth(line: str) -> int:
+    """Net '[' / ']' depth of a line, ignoring brackets inside quotes."""
+    depth = 0
+    quote = None
+    for ch in line:
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in ('"', "'"):
+            quote = ch
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+    return depth
+
+
 def _parse_toml_subset(text: str) -> Dict[str, object]:
     """Minimal parser for .lychee.toml keys we honor, when tomllib is absent."""
     result: Dict[str, object] = {}
+    # Join multi-line arrays into one logical line (the common .lychee.toml
+    # formatting) before parsing.
+    logical: List[str] = []
+    buf = ""
     for raw in text.splitlines():
-        line = raw.split("#", 1)[0].strip()
-        if not line or "=" not in line:
+        line = _strip_toml_comment(raw).strip()
+        if not line:
+            continue
+        buf = f"{buf} {line}" if buf else line
+        if _bracket_depth(buf) > 0:
+            continue  # array continues on the next line
+        logical.append(buf)
+        buf = ""
+    if buf:
+        logical.append(buf)
+    for line in logical:
+        if "=" not in line:
             continue
         key, _, rest = line.partition("=")
         key = key.strip()
         rest = rest.strip()
         if key not in ("exclude", "exclude_path", "accept"):
             continue
-        if rest.startswith("["):
-            inner = rest[1 : rest.rfind("]")]
+        if rest.startswith("[") and rest.endswith("]"):
+            inner = rest[1:-1]
             items: List[object] = []
             for part in re.findall(r'"([^"]*)"|\'([^\']*)\'|(-?\d+)', inner):
                 if part[0] != "":
@@ -688,6 +737,22 @@ def parse_accept(raw: str) -> Set[int]:
     return codes
 
 
+def normalize_accept(val: object) -> Set[int]:
+    """Coerce a config accept value (list or scalar) to a set of int codes.
+
+    A malformed entry (e.g. an empty string) is warned about and skipped
+    rather than crashing the scan.
+    """
+    codes: Set[int] = set()
+    entries: List[object] = val if isinstance(val, list) else [val]
+    for entry in entries:
+        try:
+            codes.add(int(entry))
+        except (TypeError, ValueError):
+            print(f"WARN: ignoring non-integer accept entry: {entry!r}", file=sys.stderr)
+    return codes
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = build_arg_parser().parse_args(argv)
     schemes = {s.lower() for s in (args.scheme or ["http", "https"])}
@@ -713,11 +778,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 else:
                     exclude_paths.append(str(val))
             if "accept" in cfg:
-                val = cfg["accept"]
-                if isinstance(val, list):
-                    accept = {int(x) for x in val}
-                else:
-                    accept = parse_accept(str(val))
+                accept = normalize_accept(cfg["accept"])
         else:
             print(f"WARN: config not found: {cfg_path}", file=sys.stderr)
 

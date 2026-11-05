@@ -442,6 +442,38 @@ ignore_me = true
         finally:
             path.unlink(missing_ok=True)
 
+    def test_fallback_parser_multi_line_array(self):
+        # The common .lychee.toml formatting: one item per line.
+        text = 'exclude = [\n  "localhost",\n  "example\\.com",\n]\n'
+        cfg = lc._parse_toml_subset(text)
+        self.assertEqual(cfg.get("exclude"), ["localhost", "example\\.com"])
+
+    def test_fallback_parser_hash_inside_value(self):
+        text = 'exclude = ["foo#bar"]\n'
+        cfg = lc._parse_toml_subset(text)
+        self.assertEqual(cfg.get("exclude"), ["foo#bar"])
+
+    def test_fallback_parser_trailing_comment(self):
+        text = 'exclude = ["a"] # trailing comment\n'
+        cfg = lc._parse_toml_subset(text)
+        self.assertEqual(cfg.get("exclude"), ["a"])
+
+    def test_normalize_accept_skips_bad_entries(self):
+        self.assertEqual(lc.normalize_accept(["", "200", "x"]), {200})
+        self.assertEqual(lc.normalize_accept(403), {403})
+        self.assertEqual(lc.normalize_accept(["204", 206]), {204, 206})
+
+    def test_accept_empty_entry_does_not_crash(self):
+        # int("") used to raise an uncaught ValueError from main().
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+            fh.write('accept = [""]\n')
+            path = Path(fh.name)
+        try:
+            cfg = lc.load_lychee_toml(path)
+            self.assertEqual(lc.normalize_accept(cfg.get("accept", [])), set())
+        finally:
+            path.unlink(missing_ok=True)
+
 
 class CliSmokeTests(unittest.TestCase):
     def test_cli_emits_json(self):
