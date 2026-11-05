@@ -142,13 +142,17 @@ def load_lychee_toml(path: Path) -> Dict[str, object]:
 
 FENCE_RE = re.compile(r"^(`{3,}|~{3,})")
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
+# One nesting level of balanced parens in the URL (CommonMark-approximate):
+# keeps ".../Foo_(bar)" intact while still ending at the link's closing paren.
 MD_INLINE_RE = re.compile(
-    r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)"
+    r"!?\[[^\]]*\]\(((?:[^()\s]+|\([^()\s]*\))+)(?:\s+\"[^\"]*\")?\)"
 )
 MD_REF_DEF_RE = re.compile(r"^\s*\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 MD_AUTOLINK_RE = re.compile(r"<(https?://[^>\s]+)>", re.IGNORECASE)
-BARE_URL_RE = re.compile(r"(?<![(\[<\"'])(https?://[^\s<>\)\]\"']+)", re.IGNORECASE)
+BARE_URL_RE = re.compile(
+    r"(?<![(\[<\"'])(https?://(?:[^\s<>\(\)\]\"']|\([^()\s]*\))+)", re.IGNORECASE
+)
 
 
 class _HrefSrcParser(html.parser.HTMLParser):
@@ -174,12 +178,23 @@ class _HrefSrcParser(html.parser.HTMLParser):
             self._skip_depth -= 1
 
 
+LIST_MARKER_RE = re.compile(r"^(?: {0,3})(?:[-*+]|\d{1,9}[.)])(?: +)")
+
+
 def _strip_code_regions(text: str) -> str:
-    """Remove fenced, indented, and inline code so their URLs are not extracted."""
+    """Remove fenced, indented, and inline code so their URLs are not extracted.
+
+    Indented-code detection is CommonMark-approximate: an indented line is
+    code only when it cannot be a paragraph continuation, and inside a list
+    item only when indented past the item's content column. Links in nested
+    lists and indented prose (common in READMEs) must stay extractable.
+    """
     lines = text.splitlines(keepends=True)
     out: List[str] = []
     in_fence = False
     fence_marker = ""
+    para_open = False
+    list_content_indent = 0
     for line in lines:
         if in_fence:
             if line.lstrip().startswith(fence_marker):
@@ -193,12 +208,34 @@ def _strip_code_regions(text: str) -> str:
             fence_marker = m.group(1)[0] * len(m.group(1))
             out.append("\n" if line.endswith("\n") else "")
             continue
-        # Indented code block: line starts with 4 spaces or a tab (and is not blank).
-        if re.match(r"^(?: {4}|\t)", line) and line.strip():
+        if not line.strip():
+            # Blank line: closes the paragraph, keeps the list context (loose lists).
+            para_open = False
             out.append("\n" if line.endswith("\n") else "")
             continue
+        expanded = line.replace("\t", "    ")
+        ind = len(expanded) - len(expanded.lstrip(" "))
+        if LIST_MARKER_RE.match(expanded):
+            # A list item: content of the item starts after the marker, and
+            # the marker line itself opens the item's paragraph (indented
+            # code cannot interrupt a paragraph).
+            list_content_indent = LIST_MARKER_RE.match(expanded).end()
+            para_open = True
+        elif list_content_indent and ind < list_content_indent:
+            # Dedented past the item content: the list context ends.
+            list_content_indent = 0
+            para_open = True
+        elif ind >= 4 and not para_open:
+            # Indented code block: 4+ columns past the enclosing list item's
+            # content (or past column 0), and never a paragraph continuation.
+            if ind >= list_content_indent + 4:
+                out.append("\n" if line.endswith("\n") else "")
+                continue
+            para_open = True
+        else:
+            para_open = True
         # Blank out inline code spans.
-        cleaned = INLINE_CODE_RE.sub(lambda m: " " * len(m.group(0)), line)
+        cleaned = INLINE_CODE_RE.sub(lambda mm: " " * len(mm.group(0)), line)
         out.append(cleaned)
     return "".join(out)
 
@@ -242,10 +279,22 @@ def extract_urls_from_text(text: str) -> List[str]:
     # Normalize: drop angle-bracket leftovers / trailing punctuation common in prose.
     normalized: List[str] = []
     for url in found:
-        u = url.strip().rstrip(".,;:!?)\"'")
+        u = url.strip().rstrip(".,;:!\"'")
+        u = _trim_trailing_parens(u)
         if u:
             normalized.append(u)
     return normalized
+
+
+def _trim_trailing_parens(url: str) -> str:
+    """Drop trailing ')' characters not balanced by a '(' (prose closers).
+
+    Keeps ".../Foo_(bar)" intact while trimming a URL that swallowed a
+    sentence's closing parenthesis.
+    """
+    while url.endswith(")") and url.count(")") > url.count("("):
+        url = url[:-1]
+    return url
 
 
 def path_matches_exclude(rel: str, patterns: List[str]) -> bool:
