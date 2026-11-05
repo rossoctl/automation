@@ -250,8 +250,14 @@ def collect_links(
                 print(f"WARN: cannot read {rel}: {exc}", file=sys.stderr)
                 continue
             for url in extract_urls_from_text(text):
-                parsed = urllib.parse.urlparse(url)
-                if parsed.scheme.lower() not in schemes:
+                parsed = _safe_split(url)
+                if parsed is None:
+                    # Malformed URL (e.g. "http://[::1"): when it claims to be a
+                    # web link it is a real doc bug — keep it so the checker
+                    # reports it; never let it crash the scan.
+                    if not url.lower().startswith(("http://", "https://")):
+                        continue
+                elif parsed.scheme.lower() not in schemes:
                     continue
                 key = (rel, url)
                 if key in seen:
@@ -322,6 +328,23 @@ def url_excluded(url: str, exclude_res: List[re.Pattern]) -> bool:
     return False
 
 
+def _safe_split(url: str) -> Optional[urllib.parse.SplitResult]:
+    """urlsplit that returns None instead of raising on malformed URLs.
+
+    urlsplit raises ValueError on netlocs like "http://[::1" (unclosed IPv6
+    bracket); one such string in any scanned file must not kill the run.
+    """
+    try:
+        return urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+
+
+def _host_of(url: str) -> str:
+    parts = _safe_split(url)
+    return (parts.hostname or "") if parts is not None else ""
+
+
 def parse_retry_after(value: Optional[str]) -> Optional[float]:
     if not value:
         return None
@@ -380,7 +403,7 @@ def _open(req: urllib.request.Request, timeout: float, exclude_private: bool = F
     class _LimitedRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
             if exclude_private:
-                host = urllib.parse.urlparse(newurl).hostname or ""
+                host = _host_of(newurl)
                 if host and is_private_host(host) is True:
                     raise urllib.error.URLError(f"redirect to private host {host}")
             count = getattr(req, "_redirect_count", 0) + 1
@@ -580,7 +603,7 @@ def check_all(
     for filepath, url in pairs:
         if url_excluded(url, exclude_res):
             continue
-        host = urllib.parse.urlparse(url).hostname or ""
+        host = _host_of(url)
         if exclude_private:
             priv = is_private_host(host)
             if priv is True:
@@ -597,7 +620,7 @@ def check_all(
 
     def worker(item: Tuple[str, str]) -> Tuple[str, str, Optional[Dict[str, object]]]:
         filepath, url = item
-        host = urllib.parse.urlparse(url).hostname or ""
+        host = _host_of(url)
         host_pool.acquire(host)
         try:
             status = check_one(url, timeout, max_retries, accept, exclude_private)

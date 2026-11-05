@@ -183,6 +183,27 @@ class CollectTests(unittest.TestCase):
             urls = {u for _, u in pairs}
             self.assertEqual(urls, {"https://x.example/a"})
 
+    def test_malformed_url_survives_collection(self):
+        # urlsplit raises ValueError on "http://[::1" (unclosed IPv6 bracket);
+        # one such string in any scanned file must not kill the run.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "a.md").write_text(
+                "see http://[::1 for docs\n[x](https://ok.example/y)\n",
+                encoding="utf-8",
+            )
+            (root / "b.html").write_text(
+                '<a href="ftp://[::1">ftp</a>\n', encoding="utf-8"
+            )
+            pairs = lc.collect_links(root, {"http", "https"}, [])
+            urls = {u for _, u in pairs}
+            # A malformed URL claiming to be a web link is a real doc bug:
+            # keep it so the checker reports it instead of crashing.
+            self.assertIn("http://[::1", urls)
+            self.assertIn("https://ok.example/y", urls)
+            # A malformed non-web scheme is dropped, not crashed on.
+            self.assertNotIn("ftp://[::1", urls)
+
 
 class CheckBehaviorTests(unittest.TestCase):
     def setUp(self):
@@ -255,6 +276,21 @@ class CheckBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(total, 1)
         self.assertEqual(errors, 0)
+
+    def test_malformed_ipv6_url_reported_not_crash(self):
+        total, errors, unchecked, error_map = lc.check_all(
+            [("f.md", "http://[::1")],
+            timeout=5,
+            max_retries=0,
+            max_concurrency=1,
+            accept={200},
+            exclude_res=[],
+            exclude_private=False,
+        )
+        self.assertEqual(total, 1)
+        self.assertEqual(errors, 1)
+        self.assertEqual(unchecked, 0)
+        self.assertEqual(error_map["f.md"][0]["status"]["text"], "Network error")
 
 
 class EgressRefusalTests(unittest.TestCase):
@@ -360,7 +396,10 @@ class CliSmokeTests(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
-                (root / "a.md").write_text(f"[ok]({base}/ok)\n[bad]({base}/gone)\n", encoding="utf-8")
+                (root / "a.md").write_text(
+                    f"[ok]({base}/ok)\n[bad]({base}/gone)\nsee http://[::1\n",
+                    encoding="utf-8",
+                )
                 proc = subprocess.run(
                     [
                         sys.executable,
@@ -387,8 +426,8 @@ class CliSmokeTests(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 report = json.loads(proc.stdout)
-                self.assertEqual(report["total"], 2)
-                self.assertEqual(report["errors"], 1)
+                self.assertEqual(report["total"], 3)
+                self.assertEqual(report["errors"], 2)
                 self.assertIn("a.md", report["error_map"])
         finally:
             httpd.shutdown()
