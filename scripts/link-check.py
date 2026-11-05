@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import datetime
 import email.utils
 import html.parser
 import ipaddress
@@ -353,6 +354,10 @@ def parse_retry_after(value: Optional[str]) -> Optional[float]:
         return float(value)
     try:
         dt = email.utils.parsedate_to_datetime(value)
+        if dt.tzinfo is None:
+            # parsedate_to_datetime returns naive datetimes when the date has
+            # no explicit offset; HTTP dates are GMT (RFC 7231), not local time.
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
         return max(0.0, dt.timestamp() - time.time())
     except (TypeError, ValueError, OverflowError):
         return None
@@ -439,20 +444,24 @@ def check_one(
             status = _check_once(url, timeout, accept, exclude_private)
             if status is None:
                 return None
-            # Retry on 429.
+            # Retry on 429 — even when 429 is in the accept list, the
+            # Retry-After backoff must run before the link is called OK.
             if status.get("code") == 429 and attempt < attempts - 1:
                 wait = parse_retry_after(status.pop("_retry_after", None))
                 if wait is None:
                     wait = 1.0
                 if wait > RETRY_AFTER_CAP_SECS:
-                    # Cap exceeded: stop retrying; 429 is in the default accept
-                    # list so treat as success when accept includes it.
+                    # Cap exceeded: stop retrying; treat as success only when
+                    # the accept list includes 429 (the scanner's does).
                     if 429 in accept:
                         return None
                     return {"code": 429, "text": "429"}
                 time.sleep(wait)
                 last_status = status
                 continue
+            # Retries exhausted with 429: accepted codes are not broken.
+            if status.get("code") == 429 and 429 in accept:
+                return None
             # Egress refusals are never retried — they are not "broken".
             if status.get("text") == "unchecked":
                 return status
@@ -492,29 +501,31 @@ def _check_once(
         req = urllib.request.Request(url, method="HEAD", headers=headers)
         with _open(req, timeout, exclude_private) as resp:
             code = getattr(resp, "status", None) or resp.getcode()
-            if code in accept:
-                return None
-            if code in (405, 403, 501):
-                return _get_fallback(url, timeout, accept, headers, exclude_private)
             if code == 429:
                 return {
                     "code": 429,
                     "text": "429",
                     "_retry_after": resp.headers.get("Retry-After"),
                 }
+            # HEAD is regularly denied (405/403/501) while GET works: consult
+            # the GET answer before letting the accept list decide.
+            if code in (405, 403, 501):
+                return _get_fallback(url, timeout, accept, headers, exclude_private)
+            if code in accept:
+                return None
             return {"code": int(code), "text": str(code)}
     except urllib.error.HTTPError as exc:
         code = exc.code
-        if code in accept:
-            return None
-        if code in (405, 403, 501):
-            return _get_fallback(url, timeout, accept, headers, exclude_private)
         if code == 429:
             return {
                 "code": 429,
                 "text": "429",
                 "_retry_after": exc.headers.get("Retry-After") if exc.headers else None,
             }
+        if code in (405, 403, 501):
+            return _get_fallback(url, timeout, accept, headers, exclude_private)
+        if code in accept:
+            return None
         return {"code": int(code), "text": str(code)}
     except Exception as exc:  # noqa: BLE001
         return _classify_exception(exc)
@@ -536,25 +547,25 @@ def _get_fallback(
                 resp.read(1024)
             except Exception:  # noqa: BLE001
                 pass
-            if code in accept:
-                return None
             if code == 429:
                 return {
                     "code": 429,
                     "text": "429",
                     "_retry_after": resp.headers.get("Retry-After"),
                 }
+            if code in accept:
+                return None
             return {"code": int(code), "text": str(code)}
     except urllib.error.HTTPError as exc:
         code = exc.code
-        if code in accept:
-            return None
         if code == 429:
             return {
                 "code": 429,
                 "text": "429",
                 "_retry_after": exc.headers.get("Retry-After") if exc.headers else None,
             }
+        if code in accept:
+            return None
         return {"code": int(code), "text": str(code)}
     except Exception as exc:  # noqa: BLE001
         return _classify_exception(exc)

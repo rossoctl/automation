@@ -2,6 +2,7 @@
 """Unit tests for scripts/link-check.py (stdlib only)."""
 from __future__ import annotations
 
+import email.utils
 import http.server
 import json
 import os
@@ -76,6 +77,11 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(403)
             else:
                 self._respond(200)
+        elif path == "/head-forbid-get-gone":
+            if head:
+                self._respond(403)
+            else:
+                self._respond(404)
         elif path == "/redirect":
             self.send_response(302)
             self.send_header("Location", "/ok")
@@ -94,6 +100,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 self._respond(429, headers={"Retry-After": "0"})
             else:
                 self._respond(200)
+        elif path == "/rate-always":
+            self._respond(429, headers={"Retry-After": "0"})
         else:
             self._respond(404)
 
@@ -230,6 +238,19 @@ class CheckBehaviorTests(unittest.TestCase):
         status = lc.check_one(f"{self.base}/head-forbid-get-ok", 5, 0, {200})
         self.assertIsNone(status)
 
+    def test_head_403_falls_back_even_when_accepted(self):
+        # 403 in accept must not short-circuit the GET fallback: the HEAD
+        # denial says nothing about the real answer.
+        status = lc.check_one(f"{self.base}/head-forbid-get-ok", 5, 0, {200, 403})
+        self.assertIsNone(status)
+
+    def test_head_403_get_404_reported(self):
+        # The accuracy improvement: HEAD-403/GET-404 used to be silently
+        # accepted (403 in the accept list); the GET answer is the real one.
+        status = lc.check_one(f"{self.base}/head-forbid-get-gone", 5, 0, {200, 403})
+        self.assertIsNotNone(status)
+        self.assertEqual(status.get("code"), 404)
+
     def test_redirect_followed(self):
         status = lc.check_one(f"{self.base}/redirect", 5, 0, {200})
         self.assertIsNone(status)
@@ -242,6 +263,36 @@ class CheckBehaviorTests(unittest.TestCase):
     def test_retry_after_429(self):
         status = lc.check_one(f"{self.base}/rate", 5, 2, {200})
         self.assertIsNone(status)
+
+    def test_429_retries_even_when_accepted(self):
+        # The Retry-After backoff must run even when 429 is in the accept
+        # list (the scanner's list includes it); prove the retry fired by
+        # counting requests the handler served.
+        self.httpd.rate_count = 0
+        status = lc.check_one(f"{self.base}/rate", 5, 2, {200, 429})
+        self.assertIsNone(status)
+        self.assertGreaterEqual(self.httpd.rate_count, 2)
+
+    def test_429_final_accepted(self):
+        status = lc.check_one(f"{self.base}/rate-always", 5, 0, {200, 429})
+        self.assertIsNone(status)
+
+    def test_429_final_not_accepted(self):
+        status = lc.check_one(f"{self.base}/rate-always", 5, 0, {200})
+        self.assertIsNotNone(status)
+        self.assertEqual(status.get("code"), 429)
+
+    def test_parse_retry_after_naive_date_is_utc(self):
+        self.assertEqual(lc.parse_retry_after("0"), 0.0)
+        self.assertIsNone(lc.parse_retry_after(None))
+        self.assertIsNone(lc.parse_retry_after("garbage"))
+        # A future HTTP-date without an explicit offset must not skew by the
+        # local UTC offset (naive dates are GMT per RFC 7231).
+        future = email.utils.formatdate(time.time() + 3600, usegmt=False)
+        wait = lc.parse_retry_after(future)
+        self.assertIsNotNone(wait)
+        self.assertGreaterEqual(wait, 0.0)
+        self.assertLess(wait, 3700)
 
     def test_private_ip_excluded(self):
         # 10.0.0.1 is RFC1918; with --exclude-all-private it must not be checked.
@@ -299,6 +350,8 @@ class EgressRefusalTests(unittest.TestCase):
         os.environ["https_proxy"] = "http://127.0.0.1:9"
         try:
             self.assertFalse(lc._is_egress_refusal(ConnectionResetError(54, "Connection reset by peer")))
+            self.assertFalse(lc._is_egress_refusal(ConnectionAbortedError("Connection aborted")))
+            self.assertFalse(lc._is_egress_refusal(BrokenPipeError("Broken pipe")))
             self.assertTrue(lc._is_egress_refusal(OSError("Tunnel connection failed: 403 Forbidden")))
         finally:
             if old is None:
