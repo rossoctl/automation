@@ -167,8 +167,62 @@ class ExtractionTests(unittest.TestCase):
             "https://extract.example/indented-skip",
             "https://extract.example/code-skip",
             "https://extract.example/pre-skip",
+            "https://extract.example/list-item-code-skip",
         ):
             self.assertNotIn(bad, urls)
+
+    def test_parenthesized_urls_kept(self):
+        # A ')' in the URL used to truncate it (Wikipedia-style false 404s).
+        text = (
+            "[wiki](https://extract.example/wiki/Foo_(bar))\n"
+            "bare https://extract.example/bare_(paren) here\n"
+            "period https://extract.example/period_(paren).\n"
+        )
+        urls = set(lc.extract_urls_from_text(text))
+        self.assertIn("https://extract.example/wiki/Foo_(bar)", urls)
+        self.assertIn("https://extract.example/bare_(paren)", urls)
+        self.assertIn("https://extract.example/period_(paren)", urls)
+
+    def test_prose_closing_paren_trimmed(self):
+        text = "see <https://extract.example/autolink-paren)>) and more\n"
+        urls = set(lc.extract_urls_from_text(text))
+        self.assertIn("https://extract.example/autolink-paren", urls)
+
+    def test_links_in_nested_lists_extracted(self):
+        # 4-space-indented lines inside list items used to be blanked as code.
+        text = (
+            "- outer item\n"
+            "  - nested item: [nested](https://extract.example/nested-list)\n"
+            "    four-space prose inside the nested item: https://extract.example/list-item-prose\n"
+            "- loose item\n"
+            "\n"
+            "  continuation after a blank: https://extract.example/loose-list-continuation\n"
+        )
+        urls = set(lc.extract_urls_from_text(text))
+        self.assertIn("https://extract.example/nested-list", urls)
+        self.assertIn("https://extract.example/list-item-prose", urls)
+        self.assertIn("https://extract.example/loose-list-continuation", urls)
+
+    def test_indented_paragraph_continuation_extracted(self):
+        text = (
+            "Paragraph line\n"
+            "    lazy continuation with https://extract.example/paragraph-continuation\n"
+        )
+        urls = set(lc.extract_urls_from_text(text))
+        self.assertIn("https://extract.example/paragraph-continuation", urls)
+
+    def test_indented_code_still_skipped(self):
+        text = (
+            "top level\n"
+            "\n"
+            "    https://extract.example/top-level-code-skip\n"
+            "- item\n"
+            "\n"
+            "        https://extract.example/deep-item-code-skip\n"
+        )
+        urls = set(lc.extract_urls_from_text(text))
+        self.assertNotIn("https://extract.example/top-level-code-skip", urls)
+        self.assertNotIn("https://extract.example/deep-item-code-skip", urls)
 
     def test_unused_reference_definition_skipped(self):
         text = "[ref]: https://extract.example/reference\n"
