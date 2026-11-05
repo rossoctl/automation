@@ -152,16 +152,41 @@ while IFS= read -r full_repo; do
     CONFIG_ARGS=(--config "$repo_dir/.lychee.toml")
   fi
 
+  # Keep the checker's stderr (tracebacks, WARN lines) so failures are
+  # diagnosable; it was previously discarded with 2>/dev/null.
+  CHECK_STDERR="$TMPDIR/linkcheck_${safe_repo}.stderr"
+  CHECKER_RC=0
   if [ "$LINK_CHECKER" = "python" ]; then
     python3 "$SCRIPT_DIR/link-check.py" "${LINK_CHECKER_ARGS[@]}" \
-      ${CONFIG_ARGS[@]+"${CONFIG_ARGS[@]}"} "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
+      ${CONFIG_ARGS[@]+"${CONFIG_ARGS[@]}"} "$repo_dir" \
+      > "$CHECK_OUTPUT" 2> "$CHECK_STDERR" || CHECKER_RC=$?
   else
+    # lychee exits 1 when it merely finds broken links; only the python
+    # checker's exit code is fatal (it exits 0 unless it crashed).
     lychee "${LINK_CHECKER_ARGS[@]}" \
-      ${CONFIG_ARGS[@]+"${CONFIG_ARGS[@]}"} "$repo_dir" > "$CHECK_OUTPUT" 2>/dev/null || true
+      ${CONFIG_ARGS[@]+"${CONFIG_ARGS[@]}"} "$repo_dir" \
+      > "$CHECK_OUTPUT" 2> "$CHECK_STDERR" || CHECKER_RC=$?
+  fi
+
+  if [ "$LINK_CHECKER" = "python" ] && [ "$CHECKER_RC" -ne 0 ]; then
+    echo "  WARN: link-check.py exited $CHECKER_RC for $full_repo; stderr:"
+    head -50 "$CHECK_STDERR" | sed 's/^/    /' >&2
+    REPOS_FAILED=$((REPOS_FAILED + 1))
+    continue
   fi
 
   if [ ! -s "$CHECK_OUTPUT" ]; then
-    echo "  WARN: $LINK_CHECKER produced no output for $full_repo"
+    echo "  WARN: $LINK_CHECKER produced no output for $full_repo; stderr:"
+    head -50 "$CHECK_STDERR" | sed 's/^/    /' >&2
+    REPOS_FAILED=$((REPOS_FAILED + 1))
+    continue
+  fi
+
+  # Truncated output (a crash mid-write) must not kill the whole scanner via
+  # set -e on the jq reads below; treat it as a failed repo instead.
+  if ! jq empty "$CHECK_OUTPUT" >/dev/null 2>&1; then
+    echo "  WARN: $LINK_CHECKER emitted invalid JSON for $full_repo; stderr:"
+    head -50 "$CHECK_STDERR" | sed 's/^/    /' >&2
     REPOS_FAILED=$((REPOS_FAILED + 1))
     continue
   fi
