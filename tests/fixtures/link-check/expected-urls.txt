@@ -12,4 +12,5 @@ https://extract.example/paragraph-continuation
 https://extract.example/paren-prose
 https://extract.example/paren-prose2
 https://extract.example/period_(paren)
+https://extract.example/shortcut-ref
 https://extract.example/wiki/Foo_(bar)

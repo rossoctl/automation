@@ -170,6 +170,7 @@ class ExtractionTests(unittest.TestCase):
             "https://extract.example/indented-skip",
             "https://extract.example/code-skip",
             "https://extract.example/pre-skip",
+            "https://extract.example/pre-bare-skip",
             "https://extract.example/list-item-code-skip",
         ):
             self.assertNotIn(bad, urls)
@@ -242,6 +243,41 @@ class ExtractionTests(unittest.TestCase):
     def test_used_reference_definition_kept(self):
         text = "See [docs][ref].\n\n[ref]: https://extract.example/reference\n"
         self.assertIn("https://extract.example/reference", lc.extract_urls_from_text(text))
+
+    def test_shortcut_reference_link_extracted(self):
+        # "[docs]" alone (no [ref] pair) is a valid CommonMark shortcut
+        # reference; its definition used to be dropped as unused.
+        text = "See [docs].\n\n[docs]: https://extract.example/shortcut\n"
+        self.assertIn("https://extract.example/shortcut", lc.extract_urls_from_text(text))
+
+    def test_html_indented_link_extracted(self):
+        # In HTML a four-space indent is formatting, not a code block.
+        text = '<p>intro</p>\n\n    <a href="https://extract.example/html-indent">x</a>\n'
+        urls_html = set(lc.extract_urls_from_text(text, is_html=True))
+        self.assertIn("https://extract.example/html-indent", urls_html)
+        # The markdown path still treats the same indent as a code block.
+        urls_md = set(lc.extract_urls_from_text(text))
+        self.assertNotIn("https://extract.example/html-indent", urls_md)
+
+    def test_html_pre_bare_url_skipped(self):
+        # <pre>/<code> exclusion must apply to every extraction pass
+        # (bare URLs used to be collected before the parser's skip).
+        text = "<pre>https://extract.example/pre-bare-skip</pre>\n"
+        self.assertNotIn("https://extract.example/pre-bare-skip", lc.extract_urls_from_text(text))
+        self.assertNotIn(
+            "https://extract.example/pre-bare-skip",
+            lc.extract_urls_from_text(text, is_html=True),
+        )
+
+    def test_collect_html_indented_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "page.html").write_text(
+                '<p>intro</p>\n\n    <a href="https://extract.example/html-collect">x</a>\n',
+                encoding="utf-8",
+            )
+            pairs = lc.collect_links(root, {"http", "https"}, [])
+            self.assertIn("https://extract.example/html-collect", {u for _, u in pairs})
 
 
 class CollectTests(unittest.TestCase):
