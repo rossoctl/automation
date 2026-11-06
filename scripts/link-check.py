@@ -73,6 +73,46 @@ def _bracket_depth(line: str) -> int:
     return depth
 
 
+_TOML_SIMPLE_ESCAPES = {
+    "b": "\b", "t": "\t", "n": "\n", "f": "\f", "r": "\r",
+    '"': '"', "\\": "\\", "/": "/",
+}
+
+
+def _decode_toml_basic(s: str) -> str:
+    """Decode TOML basic-string escapes ("..." strings; '...' are literal).
+
+    tomllib decodes these, so the fallback must too or exclusion regexes
+    like "foo\\\\.net" silently stop matching on Python < 3.11. Unknown
+    escapes are kept literally (best effort for regex content).
+    """
+    out: List[str] = []
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch != "\\" or i + 1 >= len(s):
+            out.append(ch)
+            i += 1
+            continue
+        nxt = s[i + 1]
+        if nxt in _TOML_SIMPLE_ESCAPES:
+            out.append(_TOML_SIMPLE_ESCAPES[nxt])
+            i += 2
+        elif nxt in ("u", "U"):
+            width = 4 if nxt == "u" else 8
+            hexdigits = s[i + 2 : i + 2 + width]
+            try:
+                out.append(chr(int(hexdigits, 16)))
+                i += 2 + width
+            except ValueError:
+                out.append(ch)
+                i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def _parse_toml_subset(text: str) -> Dict[str, object]:
     """Minimal parser for .lychee.toml keys we honor, when tomllib is absent."""
     result: Dict[str, object] = {}
@@ -104,13 +144,15 @@ def _parse_toml_subset(text: str) -> Dict[str, object]:
             items: List[object] = []
             for part in re.findall(r'"([^"]*)"|\'([^\']*)\'|(-?\d+)', inner):
                 if part[0] != "":
-                    items.append(part[0])
+                    items.append(_decode_toml_basic(part[0]))
                 elif part[1] != "":
                     items.append(part[1])
                 else:
                     items.append(int(part[2]))
             result[key] = items
-        elif rest.startswith('"') or rest.startswith("'"):
+        elif rest.startswith('"'):
+            result[key] = _decode_toml_basic(rest[1:-1])
+        elif rest.startswith("'"):
             result[key] = rest[1:-1]
         else:
             try:
