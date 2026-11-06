@@ -42,34 +42,58 @@ def _strip_toml_comment(line: str) -> str:
     """Cut the line at the first '#' outside a quoted string.
 
     A '#' inside an exclude regex (e.g. "...page#section") is a literal
-    character, not a comment.
+    character, not a comment. Escaped quotes (\\") inside basic strings do
+    not close the string.
     """
     quote = None
-    for i, ch in enumerate(line):
-        if quote is not None:
-            if ch == quote:
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote == '"':
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                quote = None
+        elif quote == "'":
+            if ch == "'":
                 quote = None
         elif ch in ('"', "'"):
             quote = ch
         elif ch == "#":
             return line[:i]
+        i += 1
     return line
 
 
 def _bracket_depth(line: str) -> int:
-    """Net '[' / ']' depth of a line, ignoring brackets inside quotes."""
+    """Net '[' / ']' depth of a line, ignoring brackets inside quotes.
+
+    Escaped quotes (\\") inside basic strings do not close the string, so a
+    ']' after one is not counted as closing the array.
+    """
     depth = 0
     quote = None
-    for ch in line:
-        if quote is not None:
-            if ch == quote:
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote == '"':
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
                 quote = None
-        elif ch in ('"', "'"):
-            quote = ch
-        elif ch == "[":
-            depth += 1
-        elif ch == "]":
-            depth -= 1
+        elif quote == "'":
+            if ch == "'":
+                quote = None
+        else:
+            if ch in ('"', "'"):
+                quote = ch
+            elif ch == "[":
+                depth += 1
+            elif ch == "]":
+                depth -= 1
+        i += 1
     return depth
 
 
@@ -113,6 +137,12 @@ def _decode_toml_basic(s: str) -> str:
     return "".join(out)
 
 
+# Array items: double-quoted basic strings (escape-aware), single-quoted
+# literal strings, or integers. Group index — not capture content — decides
+# the token type, so an empty string ("") is never mistaken for a number.
+_TOML_ITEM_RE = re.compile(r'"((?:[^"\\]|\\.)*)"|\'([^\']*)\'|(-?\d+)')
+
+
 def _parse_toml_subset(text: str) -> Dict[str, object]:
     """Minimal parser for .lychee.toml keys we honor, when tomllib is absent."""
     result: Dict[str, object] = {}
@@ -142,13 +172,13 @@ def _parse_toml_subset(text: str) -> Dict[str, object]:
         if rest.startswith("[") and rest.endswith("]"):
             inner = rest[1:-1]
             items: List[object] = []
-            for part in re.findall(r'"([^"]*)"|\'([^\']*)\'|(-?\d+)', inner):
-                if part[0] != "":
-                    items.append(_decode_toml_basic(part[0]))
-                elif part[1] != "":
-                    items.append(part[1])
+            for m in _TOML_ITEM_RE.finditer(inner):
+                if m.group(1) is not None:
+                    items.append(_decode_toml_basic(m.group(1)))
+                elif m.group(2) is not None:
+                    items.append(m.group(2))
                 else:
-                    items.append(int(part[2]))
+                    items.append(int(m.group(3)))
             result[key] = items
         elif rest.startswith('"'):
             result[key] = _decode_toml_basic(rest[1:-1])

@@ -572,6 +572,38 @@ ignore_me = true
         cfg = lc._parse_toml_subset(text)
         self.assertEqual(cfg.get("exclude"), ["café.example"])
 
+    def test_fallback_parser_empty_string_entry(self):
+        # An empty quoted string produced an all-empty regex capture tuple
+        # that was dispatched to int("") and crashed the parser — before
+        # normalize_accept's warn-and-skip could ever run.
+        cfg = lc._parse_toml_subset('accept = [""]\n')
+        self.assertEqual(cfg.get("accept"), [""])
+
+    def test_fallback_parser_escaped_quote_parity(self):
+        # Escaped quotes used to split tokens at the \", producing malformed
+        # fragments and dropping later items. tomllib is the reference.
+        import tomllib
+
+        text = 'exclude = ["foo\\"bar", "baz"]\n'
+        self.assertEqual(
+            lc._parse_toml_subset(text).get("exclude"),
+            tomllib.loads(text)["exclude"],
+        )
+
+    def test_fallback_parser_escaped_quote_scanners(self):
+        # The comment and bracket scanners must not treat \" as closing the
+        # string: a '#' or ']' after it stays inside the quoted value.
+        line = 'exclude = ["foo\\" #b"]'
+        self.assertEqual(lc._strip_toml_comment(line), line)  # no comment cut
+        self.assertEqual(lc._bracket_depth(line), 0)
+        # The ']' stays quoted, so the array opened by '[' never closes.
+        self.assertEqual(lc._bracket_depth('["a\\"]"'), 1)
+
+    def test_normalize_accept_empty_fallback_entry_does_not_crash(self):
+        # End to end through the fallback: warn-and-skip, empty accept set.
+        cfg = lc._parse_toml_subset('accept = [""]\n')
+        self.assertEqual(lc.normalize_accept(cfg.get("accept")), set())
+
     def test_normalize_accept_skips_bad_entries(self):
         self.assertEqual(lc.normalize_accept(["", "200", "x"]), {200})
         self.assertEqual(lc.normalize_accept(403), {403})
