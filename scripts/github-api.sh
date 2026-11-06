@@ -201,7 +201,7 @@ issue_has_open_pr() {
 # Canonical skill source repo. Every attribution footer points here (the repo
 # where skills are canonical), NOT at the automation repo that happens to host
 # this library copy.
-SKILL_SOURCE_REPO="${SKILL_SOURCE_REPO:-rossoctl/agent-skills}"
+SKILL_SOURCE_REPO="${SKILL_SOURCE_REPO:-rossoctl/repoman}"
 
 # Resolve a skill's pinned commit SHA, writing a per-skill _meta file beside the
 # skill on first success (create-only, self-healing).

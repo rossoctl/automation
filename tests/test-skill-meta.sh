@@ -45,6 +45,19 @@ case "$foot" in
   *) echo "FAIL branch1: attribution footer wrong: [$foot]"; fail=1 ;;
 esac
 
+# Default source repo is rossoctl/repoman (automation#131): with no per-call
+# SKILL_SOURCE_REPO override, the sourced default (set at github-api.sh load time)
+# drives the host — it must be rossoctl/repoman, never agent-skills. (The other
+# cases pin the var explicitly, so only this one exercises the default.)
+foot_def=$(SCRIPT_DIR="$dir1" skill_attribution "$SKILL")
+case "$foot_def" in
+  *"https://github.com/rossoctl/repoman/blob/"*) ;;
+  *) echo "FAIL default-source: host should be rossoctl/repoman, got: [$foot_def]"; fail=1 ;;
+esac
+case "$foot_def" in
+  *agent-skills*) echo "FAIL default-source: footer still names agent-skills: [$foot_def]"; fail=1 ;;
+esac
+
 # =============================================================================
 # Branch 2: gh fails -> nothing is written and the blob/main fallback emitted.
 # =============================================================================
