@@ -151,7 +151,10 @@ MD_REF_DEF_RE = re.compile(r"^\s*\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
 MD_AUTOLINK_RE = re.compile(r"<(https?://[^>\s]+)>", re.IGNORECASE)
 BARE_URL_RE = re.compile(
-    r"(?<![(\[<\"'])(https?://(?:[^\s<>\(\)\]\"']|\([^()\s]*\))+)", re.IGNORECASE
+    # Block only "](" (an inline-markdown link opener; MD_INLINE_RE owns those)
+    # rather than any "(" — prose like "(https://example.com/x)" must extract.
+    r"(?<!\]\()(?<![\[<\"'])(https?://(?:[^\s<>\(\)\]\"']|\([^()\s]*\))+)",
+    re.IGNORECASE,
 )
 
 

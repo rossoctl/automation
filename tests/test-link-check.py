@@ -191,6 +191,14 @@ class ExtractionTests(unittest.TestCase):
         urls = set(lc.extract_urls_from_text(text))
         self.assertIn("https://extract.example/autolink-paren", urls)
 
+    def test_prose_parenthesized_url_extracted(self):
+        # The bare-URL lookbehind used to drop any URL immediately after "(",
+        # so prose like "(see https://x/y)" or "(https://x/y)" was never checked.
+        text = "See (https://extract.example/paren) and (also https://extract.example/paren2 here).\n"
+        urls = set(lc.extract_urls_from_text(text))
+        self.assertIn("https://extract.example/paren", urls)
+        self.assertIn("https://extract.example/paren2", urls)
+
     def test_links_in_nested_lists_extracted(self):
         # 4-space-indented lines inside list items used to be blanked as code.
         text = (

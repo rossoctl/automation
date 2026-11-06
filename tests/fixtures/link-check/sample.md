@@ -25,6 +25,7 @@ HTML in markdown: <a href="https://extract.example/html-href">x</a>
 
 Parenthesized URL: [wiki](https://extract.example/wiki/Foo_(bar))
 Bare with parens: https://extract.example/bare_(paren) and trailing period https://extract.example/period_(paren).
+Prose parens: (https://extract.example/paren-prose) and (see https://extract.example/paren-prose2).
 
 - outer item
   - nested item: [nested](https://extract.example/nested-list)
