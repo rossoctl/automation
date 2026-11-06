@@ -26,6 +26,9 @@ def _load_checker():
 
     spec = importlib.util.spec_from_file_location("link_check_mod", CHECKER)
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec_module: Python 3.14 requires sys.modules to hold
+    # the module while it executes (same issue that broke doc-drift's tests).
+    sys.modules[spec.name] = mod
     assert spec.loader is not None
     spec.loader.exec_module(mod)
     return mod
@@ -516,6 +519,33 @@ ignore_me = true
         self.assertEqual(lc.normalize_accept(["", "200", "x"]), {200})
         self.assertEqual(lc.normalize_accept(403), {403})
         self.assertEqual(lc.normalize_accept(["204", 206]), {204, 206})
+
+    def test_normalize_accept_ranges(self):
+        # lychee's documented config example: accept = ["200..=204", "429"].
+        # Collapsing the range to nothing made every 200 link report broken.
+        self.assertEqual(
+            lc.normalize_accept(["200..=204", "429"]),
+            {200, 201, 202, 203, 204, 429},
+        )
+        # The documented comma-string scalar form.
+        self.assertEqual(lc.normalize_accept("200, 429"), {200, 429})
+        # Rust end-exclusive range.
+        self.assertEqual(lc.normalize_accept(["200..204"]), {200, 201, 202, 203})
+        self.assertEqual(lc.parse_accept("200..=204"), {200, 201, 202, 203, 204})
+        self.assertEqual(lc.normalize_accept([""]), set())
+
+    def test_accept_range_config_keeps_200_links_ok(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+            fh.write('accept = ["200..=204", "429"]\n')
+            path = Path(fh.name)
+        try:
+            cfg = lc.load_lychee_toml(path)
+            self.assertEqual(
+                lc.normalize_accept(cfg.get("accept")),
+                {200, 201, 202, 203, 204, 429},
+            )
+        finally:
+            path.unlink(missing_ok=True)
 
     def test_accept_empty_entry_does_not_crash(self):
         # int("") used to raise an uncaught ValueError from main().
