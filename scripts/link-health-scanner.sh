@@ -110,6 +110,10 @@ REPOS_FAILED=0
 : > "$TMPDIR/all_findings.jsonl"
 : > "$TMPDIR/broken.jsonl"
 : > "$TMPDIR/unchecked.jsonl"
+# Repos whose checker run failed this scan (crash, no output, bad JSON).
+# They contribute no findings, which is not evidence their links were
+# fixed; their prior findings are re-injected before the diff.
+: > "$TMPDIR/failed_repos.txt"
 
 # Drive the loop from the enrolled set (authoritative), statting each clone,
 # rather than globbing "$REPOS_DIR"/*/ and filtering -- a "*/" glob silently
@@ -173,6 +177,7 @@ while IFS= read -r full_repo; do
     echo "  WARN: link-check.py exited $CHECKER_RC for $full_repo; stderr:"
     head -50 "$CHECK_STDERR" | sed 's/^/    /' >&2
     REPOS_FAILED=$((REPOS_FAILED + 1))
+    printf '%s\n' "$full_repo" >> "$TMPDIR/failed_repos.txt"
     continue
   fi
 
@@ -180,6 +185,7 @@ while IFS= read -r full_repo; do
     echo "  WARN: $LINK_CHECKER produced no output for $full_repo; stderr:"
     head -50 "$CHECK_STDERR" | sed 's/^/    /' >&2
     REPOS_FAILED=$((REPOS_FAILED + 1))
+    printf '%s\n' "$full_repo" >> "$TMPDIR/failed_repos.txt"
     continue
   fi
 
@@ -189,6 +195,7 @@ while IFS= read -r full_repo; do
     echo "  WARN: $LINK_CHECKER emitted invalid JSON for $full_repo; stderr:"
     head -50 "$CHECK_STDERR" | sed 's/^/    /' >&2
     REPOS_FAILED=$((REPOS_FAILED + 1))
+    printf '%s\n' "$full_repo" >> "$TMPDIR/failed_repos.txt"
     continue
   fi
 
@@ -287,6 +294,18 @@ if [ -s "$TMPDIR/unchecked.jsonl" ] && [ -s "$PREV_BROKEN" ]; then
     ($unchecked | map([.repo, .file, .url] | join("|"))) as $keys |
     $prev[] |
     select(([.repo, .file, .url] | join("|")) as $k | ($keys | index($k)) != null)
+  ' >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
+fi
+
+# Same rule for repos whose checker run failed: they produced no findings,
+# which is not evidence anything was fixed. Without this, every previously
+# broken link in a failed repo diffs as "fixed" and its issue auto-closes
+# while repos_failed merely ticks up.
+if [ -s "$TMPDIR/failed_repos.txt" ] && [ -s "$PREV_BROKEN" ]; then
+  FAILED_ARR=$(jq -Rsc 'split("\n") | map(select(length > 0))' "$TMPDIR/failed_repos.txt" 2>/dev/null || echo '[]')
+  PREV_F_ARR=$(jq -s '.' "$PREV_BROKEN" 2>/dev/null || echo '[]')
+  jq -n -c --argjson failed "$FAILED_ARR" --argjson prev "$PREV_F_ARR" '
+    $prev[] | select(.repo as $r | ($failed | index($r)) != null)
   ' >> "$TMPDIR/broken.jsonl" 2>/dev/null || true
 fi
 

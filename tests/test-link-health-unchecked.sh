@@ -234,6 +234,92 @@ fi
 
 rm -f "$BIN/python3"
 
+# --- Case 3b: a failed repo must not auto-close its prior issues ---
+# A checker crash drops the repo's findings entirely; without carry-forward
+# every previously broken link in it diffs as "fixed" and its issue closes
+# while repos_failed merely ticks up (violates standing orders: no closing
+# without evidence the link was fixed).
+: > "$CREATE_LOG"
+: > "$CLOSE_LOG"
+
+cat > "$REPORTS/latest.json" <<'JSON'
+{
+  "scan_id": "seed",
+  "date": "2026-01-01T00:00:00Z",
+  "repos_scanned": 1,
+  "repos_failed": 0,
+  "total_links_checked": 1,
+  "broken": [
+    {
+      "repo": "alice/a",
+      "file": "README.md",
+      "url": "https://dead.example.net/x",
+      "status": "404",
+      "category": "external",
+      "issue_number": 9,
+      "first_detected": "2026-01-01",
+      "context": ""
+    }
+  ],
+  "delta": {"new": 1, "fixed": 0, "recurring": 0}
+}
+JSON
+
+# gh reports the seeded issue as open, so a close would fire if the scanner
+# incorrectly treated the failed repo's links as fixed.
+cat > "$BIN/gh" <<STUB
+#!/usr/bin/env bash
+case "\$*" in
+  *"issue create"*) echo "CREATE \$*" >> "$CREATE_LOG"; echo "https://github.com/alice/a/issues/4"; exit 0 ;;
+  *"issue close"*)  echo "CLOSE \$*" >> "$CLOSE_LOG"; exit 0 ;;
+  *"issue list"*)   echo '[{"number":9}]'; exit 0 ;;
+  *"search"*)       exit 0 ;;
+  *) exit 0 ;;
+esac
+STUB
+chmod +x "$BIN/gh"
+
+cat > "$BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+printf '{"total": '
+exit 0
+STUB
+chmod +x "$BIN/python3"
+
+REPORTS_DIR="$REPORTS" LINK_CHECKER=python PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
+
+closed3b=$(grep -c "CLOSE" "$CLOSE_LOG" 2>/dev/null || true)
+closed3b=${closed3b:-0}
+if [ "$closed3b" = "0" ]; then
+  echo "PASS: case3b failed repo did not auto-close its prior issue"
+else
+  echo "FAIL: case3b closed $closed3b issues (expected 0)"; fail=1
+fi
+
+carried3b=$(jq '[.broken[] | select(.url == "https://dead.example.net/x")] | length' \
+  "$REPORTS/latest.json" 2>/dev/null || echo 0)
+if [ "$carried3b" = "1" ]; then
+  echo "PASS: case3b failed repo's prior finding carried forward"
+else
+  echo "FAIL: case3b prior finding lost (carried=$carried3b)"; fail=1
+fi
+
+rf3b=$(jq '.repos_failed // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$rf3b" = "1" ]; then
+  echo "PASS: case3b repo counted as failed"
+else
+  echo "FAIL: case3b repos_failed=$rf3b (expected 1)"; fail=1
+fi
+
+fixed3b=$(jq '.delta.fixed // -1' "$REPORTS/latest.json" 2>/dev/null || echo -1)
+if [ "$fixed3b" = "0" ]; then
+  echo "PASS: case3b nothing counted as fixed"
+else
+  echo "FAIL: case3b delta.fixed=$fixed3b (expected 0)"; fail=1
+fi
+
+rm -f "$BIN/python3"
+
 # --- Case 4: the default checker is python (real link-check.py, no stub) ---
 : > "$CREATE_LOG"
 : > "$CLOSE_LOG"
