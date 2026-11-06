@@ -150,6 +150,9 @@ MD_INLINE_RE = re.compile(
 )
 MD_REF_DEF_RE = re.compile(r"^\s*\[([^\]]+)\]:\s*(\S+)", re.MULTILINE)
 MD_REF_USE_RE = re.compile(r"\[([^\]]*)\]\[([^\]]*)\]")
+# Shortcut reference "[label]" alone: not an inline link ("[t](…)"), not a
+# full/collapsed reference ("[t][…]"), not a definition ("[label]: …").
+MD_REF_SHORTCUT_RE = re.compile(r"\[([^\]]+)\](?![:(\[])")
 MD_AUTOLINK_RE = re.compile(r"<(https?://[^>\s]+)>", re.IGNORECASE)
 BARE_URL_RE = re.compile(
     # Block only "](" (an inline-markdown link opener; MD_INLINE_RE owns those)
@@ -255,6 +258,13 @@ def _drop_unused_ref_defs(text: str) -> str:
         label = (ref_label or text_label).strip().lower()
         if label:
             used.add(label)
+    # Shortcut references ("see [docs].") also keep their definition alive;
+    # without this the definition is dropped as unused and its URL never
+    # checked, so existing findings could be falsely treated as fixed.
+    for label in MD_REF_SHORTCUT_RE.findall(text):
+        label = label.strip().lower()
+        if label:
+            used.add(label)
 
     def repl(match: re.Match) -> str:
         if match.group(1).strip().lower() in used:
@@ -264,8 +274,26 @@ def _drop_unused_ref_defs(text: str) -> str:
     return MD_REF_DEF_RE.sub(repl, text)
 
 
-def extract_urls_from_text(text: str) -> List[str]:
-    cleaned = _drop_unused_ref_defs(_strip_code_regions(text))
+HTML_PRE_CODE_RE = re.compile(r"<(pre|code)\b[^>]*>.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+
+
+def _strip_html_code(text: str) -> str:
+    """Blank <pre>/<code> regions so no extraction pass sees their URLs.
+
+    The HTML parser already skips these tags for href/src, but the markdown
+    and bare-URL passes ran on the same text and picked up example URLs.
+    """
+    return HTML_PRE_CODE_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def extract_urls_from_text(text: str, is_html: bool = False) -> List[str]:
+    if is_html:
+        # HTML has no markdown code blocks: four-space indents and backticks
+        # are ordinary formatting, and only <pre>/<code> hides URLs.
+        cleaned = _strip_html_code(text)
+    else:
+        cleaned = _drop_unused_ref_defs(_strip_code_regions(text))
+        cleaned = _strip_html_code(cleaned)
     found: List[str] = []
     found.extend(MD_INLINE_RE.findall(cleaned))
     found.extend(url for _label, url in MD_REF_DEF_RE.findall(cleaned))
@@ -343,6 +371,7 @@ def collect_links(
             ext = Path(name).suffix.lower()
             if ext not in SCAN_EXTENSIONS:
                 continue
+            is_html = ext in (".html", ".htm")
             abs_path = Path(dirpath) / name
             rel = str(abs_path.relative_to(root)).replace(os.sep, "/")
             if path_matches_exclude(rel, exclude_paths):
@@ -352,7 +381,7 @@ def collect_links(
             except OSError as exc:
                 print(f"WARN: cannot read {rel}: {exc}", file=sys.stderr)
                 continue
-            for url in extract_urls_from_text(text):
+            for url in extract_urls_from_text(text, is_html=is_html):
                 parsed = _safe_split(url)
                 if parsed is None:
                     # Malformed URL (e.g. "http://[::1"): when it claims to be a

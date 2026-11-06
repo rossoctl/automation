@@ -22,6 +22,11 @@ HTML in markdown: <a href="https://extract.example/html-href">x</a>
 <img src="https://extract.example/html-src">
 <code><a href="https://extract.example/code-skip">no</a></code>
 <pre><a href="https://extract.example/pre-skip">no</a></pre>
+HTML pre with a bare URL (must skip): <pre>https://extract.example/pre-bare-skip</pre>
+
+Shortcut reference: see [shortcut].
+
+[shortcut]: https://extract.example/shortcut-ref
 
 Parenthesized URL: [wiki](https://extract.example/wiki/Foo_(bar))
 Bare with parens: https://extract.example/bare_(paren) and trailing period https://extract.example/period_(paren).
