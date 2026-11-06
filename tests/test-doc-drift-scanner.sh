@@ -260,7 +260,9 @@ write_env "$C4_ROOT" "acme" "widget"
 write_gh_stub "$C4/bin" "$C4_LOG" "" ""
 C4_REPORTS="$C4/reports"; mkdir -p "$C4_REPORTS"
 printf '{"scan_id":"prev-1"}\n' > "$C4_REPORTS/latest.json"
+printf '[{"scan_id":"prev-1"}]\n' > "$C4_REPORTS/history.json"
 C4_PRE=$(cat "$C4_REPORTS/latest.json")
+C4_HIST_PRE=$(cat "$C4_REPORTS/history.json")
 REPORTS_DIR="$C4_REPORTS" PATH="$C4/bin:$PATH" bash "$SCANNER" --dry-run >/dev/null 2>&1
 rc4=$?
 
@@ -269,15 +271,22 @@ if [ "$rc4" -eq 0 ]; then
 else
   fail_msg "case4: --dry-run exit $rc4"
 fi
-if grep -Eq "issue (create|edit|close)" "$C4_LOG"; then
-  fail_msg "case4: --dry-run made a write-issue gh call"; cat "$C4_LOG"
+# Reject EVERY remote write, not just create/edit/close: also issue comment and
+# label create (Jim, #132) — dry-run must touch nothing on GitHub.
+if grep -Eq "issue (create|edit|close|comment)|label create" "$C4_LOG"; then
+  fail_msg "case4: --dry-run made a remote-write gh call"; cat "$C4_LOG"
 else
-  pass "case4: --dry-run made no issue create/edit/close"
+  pass "case4: --dry-run made no remote write (create/edit/close/comment/label)"
 fi
 if [ "$(cat "$C4_REPORTS/latest.json")" = "$C4_PRE" ]; then
   pass "case4: --dry-run left latest.json unchanged"
 else
   fail_msg "case4: --dry-run overwrote latest.json"
+fi
+if [ "$(cat "$C4_REPORTS/history.json")" = "$C4_HIST_PRE" ]; then
+  pass "case4: --dry-run left history.json unchanged"
+else
+  fail_msg "case4: --dry-run appended to history.json"
 fi
 
 # ===========================================================================
@@ -301,10 +310,19 @@ else
   fail_msg "case5: --issue-limit exit $rc5"
 fi
 c5creates=$(grep -c "issue create" "$C5_LOG" 2>/dev/null || true)
-if [ "${c5creates:-0}" -le 1 ]; then
-  pass "case5: at most one issue create with --issue-limit 1 (got $c5creates)"
+# Assert EXACTLY one create, not <=1: with two drifting fixtures, <=1 would also
+# pass if --issue-limit wrongly suppressed ALL creation (0). (Jim, #132)
+if [ "${c5creates:-0}" -eq 1 ]; then
+  pass "case5: exactly one issue create with --issue-limit 1 (got $c5creates)"
 else
-  fail_msg "case5: more than one issue created ($c5creates) despite --issue-limit 1"; cat "$C5_LOG"
+  fail_msg "case5: expected exactly 1 issue create with --issue-limit 1, got $c5creates"; cat "$C5_LOG"
+fi
+# And the limit must cap ISSUE WRITES, not the SCAN: both repos are still scanned.
+c5scanned=$(jq -r '.repos_scanned' "$C5_REPORTS/latest.json" 2>/dev/null)
+if [ "${c5scanned:-0}" -eq 2 ]; then
+  pass "case5: both repos scanned despite --issue-limit 1 (repos_scanned=$c5scanned)"
+else
+  fail_msg "case5: --issue-limit limited the scan, not issue writes (repos_scanned=$c5scanned, expected 2)"
 fi
 
 # ===========================================================================
