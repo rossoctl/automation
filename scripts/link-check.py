@@ -773,32 +773,56 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def parse_accept(raw: str) -> Set[int]:
+def _accept_codes_from_text(raw: str) -> Set[int]:
+    """Expand a comma-separated accept string: ints or lychee ranges.
+
+    lychee's documented config examples include accept = ["200..=204", "429"]
+    and accept = "200, 429"; a range or list that collapses to nothing would
+    make every unlisted code (including 200) report as broken, so both forms
+    must expand.
+    """
     codes: Set[int] = set()
     for part in raw.split(","):
         part = part.strip()
         if not part:
             continue
+        m = re.fullmatch(r"(\d+)\.\.=(\d+)", part)
+        if m:
+            codes.update(range(int(m.group(1)), int(m.group(2)) + 1))
+            continue
+        m = re.fullmatch(r"(\d+)\.\.(\d+)", part)
+        if m:
+            # Rust range semantics: end-exclusive.
+            codes.update(range(int(m.group(1)), int(m.group(2))))
+            continue
         try:
             codes.add(int(part))
         except ValueError:
-            print(f"WARN: ignoring non-integer accept code: {part}", file=sys.stderr)
+            print(f"WARN: ignoring non-integer accept entry: {part!r}", file=sys.stderr)
     return codes
+
+
+def parse_accept(raw: str) -> Set[int]:
+    return _accept_codes_from_text(raw)
 
 
 def normalize_accept(val: object) -> Set[int]:
     """Coerce a config accept value (list or scalar) to a set of int codes.
 
-    A malformed entry (e.g. an empty string) is warned about and skipped
-    rather than crashing the scan.
+    Handles ints, range strings ("200..=204"), and comma strings
+    ("200, 429"). A malformed entry is warned about and skipped rather than
+    crashing the scan.
     """
-    codes: Set[int] = set()
     entries: List[object] = val if isinstance(val, list) else [val]
+    codes: Set[int] = set()
     for entry in entries:
-        try:
-            codes.add(int(entry))
-        except (TypeError, ValueError):
-            print(f"WARN: ignoring non-integer accept entry: {entry!r}", file=sys.stderr)
+        if isinstance(entry, str):
+            codes |= _accept_codes_from_text(entry)
+        else:
+            try:
+                codes.add(int(entry))
+            except (TypeError, ValueError):
+                print(f"WARN: ignoring non-integer accept entry: {entry!r}", file=sys.stderr)
     return codes
 
 
@@ -827,7 +851,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 else:
                     exclude_paths.append(str(val))
             if "accept" in cfg:
-                accept = normalize_accept(cfg["accept"])
+                cfg_accept = normalize_accept(cfg["accept"])
+                if cfg_accept:
+                    accept = cfg_accept
+                else:
+                    # An accept config that expands to nothing would flag
+                    # every link as broken; keep the scanner-level list.
+                    print(
+                        "WARN: config accept expands to no codes; "
+                        "keeping the scanner accept list",
+                        file=sys.stderr,
+                    )
         else:
             print(f"WARN: config not found: {cfg_path}", file=sys.stderr)
 
