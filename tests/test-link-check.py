@@ -559,6 +559,19 @@ ignore_me = true
         cfg = lc._parse_toml_subset(text)
         self.assertEqual(cfg.get("exclude"), ["a"])
 
+    def test_fallback_parser_decodes_basic_string_escapes(self):
+        # TOML basic strings decode escapes (matching tomllib); literal
+        # '...' strings do not. Undecoded, exclusion regexes silently stop
+        # matching on Python < 3.11.
+        text = "exclude = [\"a\\\\b\", 'c\\\\d']\n"
+        cfg = lc._parse_toml_subset(text)
+        self.assertEqual(cfg.get("exclude"), ["a\\b", "c\\\\d"])
+
+    def test_fallback_parser_unicode_escape(self):
+        text = 'exclude = ["caf\\u00e9.example"]\n'
+        cfg = lc._parse_toml_subset(text)
+        self.assertEqual(cfg.get("exclude"), ["café.example"])
+
     def test_normalize_accept_skips_bad_entries(self):
         self.assertEqual(lc.normalize_accept(["", "200", "x"]), {200})
         self.assertEqual(lc.normalize_accept(403), {403})
