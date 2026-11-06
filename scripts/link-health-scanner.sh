@@ -206,6 +206,13 @@ while IFS= read -r full_repo; do
   TOTAL_ERRORS=$((TOTAL_ERRORS + repo_errors))
   REPOS_SCANNED=$((REPOS_SCANNED + 1))
 
+  # Surface checker warnings (unsupported .lychee.toml keys, bad regexes,
+  # non-integer accepts) on a healthy run too; CHECK_STDERR was previously
+  # only printed on failure, so config problems were invisible.
+  if [ -s "$CHECK_STDERR" ]; then
+    grep '^WARN' "$CHECK_STDERR" | head -10 | sed 's/^/    /' >&2 || true
+  fi
+
   # Extract findings from the checker report. Parsing/suppression/status
   # normalization lives in extract-broken-links.sh (unit-tested).
   "$SCRIPT_DIR/extract-broken-links.sh" \

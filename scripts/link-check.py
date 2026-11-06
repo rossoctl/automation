@@ -13,6 +13,7 @@ import argparse
 import concurrent.futures
 import datetime
 import email.utils
+import functools
 import html.parser
 import ipaddress
 import json
@@ -378,8 +379,14 @@ def proxy_env_set() -> bool:
     return False
 
 
+@functools.lru_cache(maxsize=1024)
 def is_private_host(host: str) -> Optional[bool]:
-    """Return True if host is private, False if public, None on DNS failure."""
+    """Return True if host is private, False if public, None on DNS failure.
+
+    Cached: --exclude-all-private is always passed by the scanner, so every
+    URL paid an uncached getaddrinfo in the main thread before the pool
+    started — N lookups even when the links share a host.
+    """
     if not host:
         return False
     # Strip brackets from IPv6 literals.
