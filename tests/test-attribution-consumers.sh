@@ -3,7 +3,7 @@
 # Pinned-SHA footer for pr-review (pr-review-fixer.sh footer) and
 # weekly-report (appended to the posted report).
 # The rules are: write _meta only after the SHA resolves, never overwrite a valid
-# file, and fall back to blob/main when resolution fails.
+# file, and fall back to a linkless footer when resolution fails.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPTS="$ROOT/scripts"

@@ -59,7 +59,7 @@ case "$foot_def" in
 esac
 
 # =============================================================================
-# Branch 2: gh fails -> nothing is written and the blob/main fallback emitted.
+# Branch 2: gh fails -> nothing is written and the linkless fallback emitted.
 # =============================================================================
 dir2="$TEST_TMPDIR/case2"
 mkdir -p "$dir2"

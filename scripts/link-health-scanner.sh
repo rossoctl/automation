@@ -49,7 +49,7 @@ REPORT_TARGET_PATH="automation-health/link-health.md"
 
 # Provenance footer for the report-PR body. Resolved once at startup: the
 # helper lazily writes _meta.<skill>.json beside this skill and returns the pinned-SHA
-# RepoMan attribution (blob/main fallback when the SHA cannot be resolved).
+# RepoMan attribution (linkless footer when the SHA cannot be resolved).
 SKILL_FOOTER=$(skill_attribution "link-health-scanner")
 
 # Clone dir for the report target: honor an explicit MAIN_REPO_DIR override,
