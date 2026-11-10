@@ -72,14 +72,16 @@ MAX_HISTORY_ROWS=500
 # startup: the helper lazily writes _meta.<skill>.json beside this skill and returns the
 # pinned-SHA attribution (linkless fallback when unresolved).
 SKILL_FOOTER=$(skill_attribution "dep-bump-fixer")
-# Stable dedup key: the substring every footer form shares, regardless of the
-# per-run SHA. Both the resolved footer ("...repoman [dep-bump-fixer@<sha>](...)")
-# and the linkless fallback ("...repoman dep-bump-fixer.") contain the bare skill
-# name, so the dedup search (below) looks for THIS, not the whole footer, and a
-# changing SHA never defeats dedup. Comments carrying the former marker value are
-# no longer recognized, so an already-analyzed PR may receive one duplicate comment
-# on the next run after the marker changed — acceptable, one-time.
-FIXER_SIGNATURE="dep-bump-fixer"
+# Stable dedup key: a regex (jq `test`, below) anchored to the footer so it
+# matches a fixer comment but not a human comment that merely mentions the tool.
+# It matches all three footer forms, regardless of the per-run SHA: the resolved
+# footer ("...by repoman [dep-bump-fixer@<sha>](...)"), the linkless fallback
+# ("...by repoman dep-bump-fixer."), and the legacy "...by RepoMan dep-bump-fixer@"
+# form (so comments posted before the format flip keep deduping). A bare mention
+# like "dep-bump-fixer skipped this one" or a link to skills/dep-bump-fixer/ is
+# NOT anchored to "by (repoman|RepoMan)", so it never false-positives into
+# suppressing analysis.
+FIXER_SIGNATURE="by (repoman \[?|RepoMan )dep-bump-fixer"
 
 # --- Workspace setup ---
 setup_workspace "dep-bump-fixer"
@@ -262,7 +264,7 @@ while IFS= read -r issue_record; do
   # shellcheck disable=SC2016
   already_commented=$(gh_with_backoff pr view "$pr_number" --repo "$issue_repo" \
     --json comments --jq --arg sig "$FIXER_SIGNATURE" \
-    '[.comments[] | select(.body | contains($sig))] | length' 2>/dev/null || echo "0")
+    '[.comments[] | select(.body | test($sig))] | length' 2>/dev/null || echo "0")
 
   if [ "$already_commented" -gt 0 ]; then
     if [ "$VERBOSE" = true ]; then
