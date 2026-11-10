@@ -39,7 +39,7 @@ jobs:
         # tests/test-repoman-setup.sh is deliberately NOT listed here because it
         # carries intentional test idioms (SC2088 literal-tilde, SC2034 var read
         # by a sourced function) that are load-bearing for what it asserts.
-        run: shellcheck --severity=warning tests/test-repoman-requirements.sh tests/test-github-api.sh tests/test-repoman-check.sh tests/test-repoman-run.sh tests/test-repo-sync.sh tests/test-repoman-index.sh tests/test-repoman-match-name.sh tests/test-automation-health-dashboard.sh tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh tests/test-skill-meta.sh tests/test-attribution-consumers.sh tests/test-pr-review-integration.sh tests/test-pr-review-impact.sh tests/test-pr-review-state.sh tests/test-weekly-report.sh tests/test-link-health-subset-carryforward.sh tests/test-dep-bump-subset-carryforward.sh tests/test-pr-review-subset-carryforward.sh tests/test-link-health-dryrun-baseline.sh tests/test-doc-drift-check.sh tests/test-doc-drift-precheck.sh tests/test-doc-drift-scanner.sh
+        run: shellcheck --severity=warning tests/test-repoman-requirements.sh tests/test-github-api.sh tests/test-repoman-check.sh tests/test-repoman-run.sh tests/test-repo-sync.sh tests/test-repoman-index.sh tests/test-repoman-match-name.sh tests/test-automation-health-dashboard.sh tests/test-link-health-index-wiring.sh tests/test-dep-bump-index-wiring.sh tests/test-skill-meta.sh tests/test-attribution-consumers.sh tests/test-pr-review-integration.sh tests/test-pr-review-impact.sh tests/test-pr-review-state.sh tests/test-weekly-report.sh tests/test-link-health-subset-carryforward.sh tests/test-dep-bump-subset-carryforward.sh tests/test-pr-review-subset-carryforward.sh tests/test-link-health-dryrun-baseline.sh tests/test-doc-drift-check.sh tests/test-doc-drift-precheck.sh tests/test-doc-drift-scanner.sh tests/test-pr-review-fixer-begin-large-diff.sh
       - name: shellcheck (doc-drift)
         # New consumer scripts stay warning-clean (no SC2034 arg-parsing idiom).
         run: shellcheck --severity=warning scripts/doc-drift-scanner.sh scripts/doc-drift-fixer.sh scripts/doc-drift-precheck.sh
@@ -76,7 +76,8 @@ jobs:
                    tests/test-link-health-dryrun-baseline.sh \
                    tests/test-doc-drift-check.sh \
                    tests/test-doc-drift-precheck.sh \
-                   tests/test-doc-drift-scanner.sh; do
+                   tests/test-doc-drift-scanner.sh \
+                   tests/test-pr-review-fixer-begin-large-diff.sh; do
             echo "== $t =="
             bash "$t"
           done
