@@ -69,4 +69,17 @@ expect_count 0 "a link to the skill dir is not counted" \
 expect_count 1 "footer counted among unrelated comments" \
   "dep-bump-fixer looks great" "$resolved" "lgtm"
 
-[ "$fail" -eq 0 ] && echo "PASS: dep-bump-fixer dedup counts footers, rejects mentions" || exit 1
+# A gh failure must be DISTINGUISHABLE from "zero matching comments": it returns
+# -1 (unknown), not 0, so a transient error does not read as "not commented yet"
+# and re-post a duplicate. The caller treats a non-zero result as "skip".
+gh_fail_result=$(
+  gh_with_backoff() { return 1; }
+  fixer_comment_count "acme/widgets" "7" "$FIXER_SIGNATURE"
+)
+if [ "$gh_fail_result" = "-1" ]; then
+  echo "PASS: gh failure returns -1 (unknown), not 0"
+else
+  echo "FAIL: gh failure should return -1, got [$gh_fail_result]"; fail=1
+fi
+
+[ "$fail" -eq 0 ] && echo "PASS: dep-bump-fixer dedup counts footers, rejects mentions, signals gh failure" || exit 1

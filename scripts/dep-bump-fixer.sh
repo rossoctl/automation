@@ -261,11 +261,17 @@ while IFS= read -r issue_record; do
 
   # Check if fixer already commented on this PR. The signature is a regex bound
   # via a real jq --arg inside the helper — `gh pr view --jq` cannot take --arg.
+  # The helper returns -1 (UNKNOWN) when the fetch fails; skip on anything but a
+  # hard 0 so a transient error never re-posts a duplicate comment.
   already_commented=$(fixer_comment_count "$issue_repo" "$pr_number" "$FIXER_SIGNATURE")
 
-  if [ "$already_commented" -gt 0 ]; then
+  if [ "$already_commented" != "0" ]; then
     if [ "$VERBOSE" = true ]; then
-      echo "    Already commented, skipping"
+      if [ "$already_commented" = "-1" ]; then
+        echo "    Comment-status check failed, skipping to avoid a duplicate"
+      else
+        echo "    Already commented, skipping"
+      fi
     fi
     SKIPPED_ALREADY_COMMENTED=$((SKIPPED_ALREADY_COMMENTED + 1))
     continue

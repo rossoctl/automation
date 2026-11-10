@@ -57,24 +57,32 @@ gh_with_backoff() {
 # signature must be bound with a REAL jq on a pipe, not inside gh's --jq. We
 # fetch the comments JSON (no --jq) and pipe to `jq --arg sig … test($sig)`.
 #
+# A fetch/parse failure returns -1 (UNKNOWN), kept distinct from 0 (no matching
+# comment) so a transient gh error does not read as "not commented yet" and make
+# the caller re-post a duplicate. The caller treats any non-zero result as
+# "skip": only a hard 0 proves it is safe to comment.
+#
 # Usage:
 #   n=$(fixer_comment_count "kagenti/adk" 42 "$FIXER_SIGNATURE")
-#   [ "$n" -gt 0 ] && echo "already commented"
+#   [ "$n" = "0" ] || echo "skip (already commented, or status unknown)"
 #
 # Args:
 #   $1 - full repo name (e.g., "kagenti/adk")
 #   $2 - PR number
 #   $3 - jq regex matched against each comment body (test())
-# Prints: the match count (0 on any failure, so callers degrade to "comment")
+# Prints: the match count (>=0), or -1 if the fetch/parse failed
 fixer_comment_count() {
-  local repo="$1" pr_number="$2" sig="$3" comments
+  local repo="$1" pr_number="$2" sig="$3" comments count
   if ! comments=$(gh_with_backoff pr view "$pr_number" --repo "$repo" --json comments 2>/dev/null); then
-    echo "0"
+    echo "-1"
     return 0
   fi
-  printf '%s' "$comments" \
-    | jq -r --arg sig "$sig" '[.comments[] | select(.body | test($sig))] | length' 2>/dev/null \
-    || echo "0"
+  if ! count=$(printf '%s' "$comments" \
+      | jq -r --arg sig "$sig" '[.comments[] | select(.body | test($sig))] | length' 2>/dev/null); then
+    echo "-1"
+    return 0
+  fi
+  echo "$count"
 }
 
 # =============================================================================
