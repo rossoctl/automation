@@ -29,7 +29,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# LINK_CHECKER selects the link checker. Default python (repoman#3): the
+# LINK_CHECKER selects the link checker. Default python ([repoman#3](https://github.com/rossoctl/repoman/issues/3)): the
 # stdlib checker needs only python3, so the program runs on a basic agent
 # image; lychee stays available as an opt-in fallback.
 LINK_CHECKER="${LINK_CHECKER:-python}"
