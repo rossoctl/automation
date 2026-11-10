@@ -5,13 +5,21 @@
 **Approval gate:** None for issues or report updates.
 **Escalation:**
   - More than 20 new broken links in a single scan: alert owner
-  - Lychee fails on a repo (network, auth): log and continue with remaining repos
+  - Link checker fails on a repo (crash, bad output): count it as failed, carry its prior findings forward (never auto-close), continue with remaining repos
   - GitHub API rate limit hit: stop issue creation, report partial results
+
+### Link checker
+- Default: `LINK_CHECKER=python` — the stdlib `scripts/link-check.py` (Python 3.8+, no extra install; the program runs on a basic agent image).
+- Opt-in fallback: `LINK_CHECKER=lychee` (lychee >= 0.23.0 must be on PATH).
+- Egress-proxy refusals are reported as `unchecked` (not broken): no issue is opened or auto-closed for them; the run summary and dashboard show the unchecked count and top hosts. Widen the egress allowlist to convert them into real results.
+- Shadow mode: set `LINK_HEALTH_SHADOW_OUT=<path>` to run a checker side-by-side and write only a side report — it forces dry-run, so the production baseline and issues are never touched.
 
 ### Scope
 - The core repositories under the active org (see `config/core-repos.txt`), cloned locally
 - Only documentation files: markdown (.md), HTML, and config files with URLs
-- Uses existing .lychee.toml in each repo when present; falls back to default config
+- Uses existing .lychee.toml in each repo when present; the subset honored by the
+  python checker is `exclude`, `exclude_path`, and `accept` (including ranges like
+  `"200..=204"`); other keys are warned about and ignored
 
 ### What NOT to Do
 - Do not modify source code files
