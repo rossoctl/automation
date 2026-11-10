@@ -4,7 +4,7 @@ set -euo pipefail
 # Verifies scripts/weekly-report.sh builds the generator invocation from the
 # RepoMan enrolled set. Hermetic: a fixture enrolled set via $REPOMAN_REPOS_FILE,
 # a stub report.py via $REPORT_PY, and a failing gh so provenance falls back
-# to blob/main without network. The enrolled set can span owners, so each repo
+# to the linkless footer without network. The enrolled set can span owners, so each repo
 # is passed owner-qualified and there is no --org.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
