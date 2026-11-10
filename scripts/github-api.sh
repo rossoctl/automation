@@ -50,6 +50,33 @@ gh_with_backoff() {
   return 1
 }
 
+# Count the PR comments whose body matches a signature regex — the fixer's
+# dedup check, so it does not re-comment on a PR it already commented on.
+#
+# `gh pr view --jq` accepts a single jq expression and has no `--arg`, so the
+# signature must be bound with a REAL jq on a pipe, not inside gh's --jq. We
+# fetch the comments JSON (no --jq) and pipe to `jq --arg sig … test($sig)`.
+#
+# Usage:
+#   n=$(fixer_comment_count "kagenti/adk" 42 "$FIXER_SIGNATURE")
+#   [ "$n" -gt 0 ] && echo "already commented"
+#
+# Args:
+#   $1 - full repo name (e.g., "kagenti/adk")
+#   $2 - PR number
+#   $3 - jq regex matched against each comment body (test())
+# Prints: the match count (0 on any failure, so callers degrade to "comment")
+fixer_comment_count() {
+  local repo="$1" pr_number="$2" sig="$3" comments
+  if ! comments=$(gh_with_backoff pr view "$pr_number" --repo "$repo" --json comments 2>/dev/null); then
+    echo "0"
+    return 0
+  fi
+  printf '%s' "$comments" \
+    | jq -r --arg sig "$sig" '[.comments[] | select(.body | test($sig))] | length' 2>/dev/null \
+    || echo "0"
+}
+
 # =============================================================================
 # GITHUB ISSUES
 # =============================================================================

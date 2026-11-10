@@ -259,12 +259,9 @@ while IFS= read -r issue_record; do
     continue
   fi
 
-  # Check if fixer already commented on this PR
-  # $sig below is a jq variable passed via --arg, not a shell expansion
-  # shellcheck disable=SC2016
-  already_commented=$(gh_with_backoff pr view "$pr_number" --repo "$issue_repo" \
-    --json comments --jq --arg sig "$FIXER_SIGNATURE" \
-    '[.comments[] | select(.body | test($sig))] | length' 2>/dev/null || echo "0")
+  # Check if fixer already commented on this PR. The signature is a regex bound
+  # via a real jq --arg inside the helper — `gh pr view --jq` cannot take --arg.
+  already_commented=$(fixer_comment_count "$issue_repo" "$pr_number" "$FIXER_SIGNATURE")
 
   if [ "$already_commented" -gt 0 ]; then
     if [ "$VERBOSE" = true ]; then
