@@ -13,6 +13,7 @@ create_fork_pr
 diff_against_previous
 enrolled_clone_dirs
 ensure_fork
+fixer_comment_count
 generate_scan_id
 gh_issue_exists
 gh_with_backoff
@@ -42,7 +43,7 @@ GOT=$(
 )
 
 if [ "$GOT" = "$WANT" ]; then
-  echo "PASS: lib function inventory (28 functions, none lost/renamed)"
+  echo "PASS: lib function inventory (29 functions, none lost/renamed)"
   exit 0
 else
   echo "FAIL: lib function inventory mismatch"
