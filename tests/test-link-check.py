@@ -91,6 +91,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
         elif path == "/redirect-private":
+            count = getattr(self.server, "redirect_private_count", 0)
+            self.server.redirect_private_count = count + 1
             self.send_response(302)
             self.send_header("Location", "http://10.0.0.1/secret")
             self.send_header("Content-Length", "0")
@@ -112,6 +114,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 def start_server():
     httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), _Handler)
     httpd.rate_count = 0
+    httpd.redirect_private_count = 0
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     port = httpd.server_address[1]
@@ -123,27 +126,51 @@ class _Proxy403(socketserver.ThreadingTCPServer):
 
 
 class _ProxyHandler(socketserver.StreamRequestHandler):
-    """Minimal CONNECT proxy that always refuses with HTTP 403."""
+    """Minimal proxy that always refuses with HTTP 403.
+
+    For plain-http URLs urllib sends absolute-URI requests (no CONNECT
+    tunnel); those refusals carry the gateway's signature (marker header
+    and body) when the server's ``sign_refusals`` flag is set, and a bare
+    403 when it is not — an origin-shaped answer relayed by the proxy.
+    """
 
     def handle(self):
         line = self.rfile.readline().decode("latin1", errors="replace")
+        method = line.split(" ")[0].upper() if line else ""
         # Drain headers
         while True:
             h = self.rfile.readline()
             if h in (b"\r\n", b"\n", b""):
                 break
-        if line.upper().startswith("CONNECT"):
+        if method == "CONNECT":
             body = b"Forbidden\n"
             self.wfile.write(
                 b"HTTP/1.1 403 Forbidden\r\nContent-Length: %d\r\n\r\n" % len(body)
             )
             self.wfile.write(body)
+        elif getattr(self.server, "sign_refusals", True):
+            body = b"Access Denied\n\nYour request is blocked by the egress gateway.\n"
+            self.wfile.write(
+                b"HTTP/1.1 403 Forbidden\r\n"
+                b"X-Squid-Error: ERR_ACCESS_DENIED 0\r\n"
+                b"Content-Type: text/plain\r\n"
+                b"Content-Length: %d\r\n\r\n" % len(body)
+            )
+            if method != "HEAD":
+                self.wfile.write(body)
         else:
-            self.wfile.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+            # Origin-shaped 403 (no gateway signature): a neutral header so
+            # tests can opt it in as a refusal via LINK_CHECK_GATEWAY_MARKERS.
+            self.wfile.write(
+                b"HTTP/1.1 403 Forbidden\r\n"
+                b"X-Origin-Error: true\r\n"
+                b"Content-Length: 0\r\n\r\n"
+            )
 
 
-def start_proxy():
+def start_proxy(sign_refusals=True):
     proxy = _Proxy403(("127.0.0.1", 0), _ProxyHandler)
+    proxy.sign_refusals = sign_refusals
     t = threading.Thread(target=proxy.serve_forever, daemon=True)
     t.start()
     port = proxy.server_address[1]
@@ -356,10 +383,21 @@ class CheckBehaviorTests(unittest.TestCase):
         status = lc.check_one(f"{self.base}/redirect", 5, 0, {200})
         self.assertIsNone(status)
 
-    def test_private_redirect_not_fetched(self):
+    def test_private_redirect_excluded(self):
+        # Under --exclude-all-private a public URL redirecting to a private
+        # host is excluded (lychee parity), not reported broken: it returns
+        # a success status and the private host is never fetched.
         status = lc.check_one(f"{self.base}/redirect-private", 5, 0, {200}, exclude_private=True)
-        self.assertIsNotNone(status)
-        self.assertIn("private", str(status.get("details", "")).lower())
+        self.assertIsNone(status)
+
+    def test_private_redirect_excluded_even_with_retries(self):
+        # The exclusion must hold when retries are available: the old
+        # "Network error" classification was retried and then reported.
+        self.httpd.redirect_private_count = 0
+        status = lc.check_one(f"{self.base}/redirect-private", 5, 2, {200}, exclude_private=True)
+        self.assertIsNone(status)
+        # Only the first (HEAD) request was served; no retry, no GET.
+        self.assertEqual(getattr(self.httpd, "redirect_private_count", 0), 1)
 
     def test_retry_after_429(self):
         status = lc.check_one(f"{self.base}/rate", 5, 2, {200})
@@ -520,6 +558,164 @@ class EgressRefusalTests(unittest.TestCase):
                     os.environ[k] = v
             proxy.shutdown()
             proxy.server_close()
+
+    def test_http_proxy_403_gateway_marker_is_unchecked(self):
+        # Plain-http links go to the proxy as absolute-URI requests; a
+        # gateway refusal comes back as an ordinary 403 carrying the
+        # gateway's signature and must classify as unchecked, not broken.
+        proxy, proxy_url = start_proxy(sign_refusals=True)
+        old = {
+            k: os.environ.get(k)
+            for k in (
+                "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY",
+                "LINK_CHECK_GATEWAY_MARKERS",
+            )
+        }
+        try:
+            for k in old:
+                os.environ.pop(k, None)
+            os.environ["http_proxy"] = proxy_url
+            status = lc.check_one("http://unlisted.example.invalid/x", 5, 0, {200})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("text"), "unchecked")
+            self.assertIsNone(status.get("code"))
+            # Even with 403 in the accept list (the scanner's list has it),
+            # a refusal is unverified, not OK.
+            status = lc.check_one("http://unlisted.example.invalid/x", 5, 0, {200, 403})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("text"), "unchecked")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            proxy.shutdown()
+            proxy.server_close()
+
+    def test_http_proxy_403_without_gateway_marker_stays_broken(self):
+        # A 403 relayed by the proxy but without any gateway signature is
+        # an origin answer: it must stay a real (broken) result.
+        proxy, proxy_url = start_proxy(sign_refusals=False)
+        old = {
+            k: os.environ.get(k)
+            for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                      "no_proxy", "NO_PROXY", "LINK_CHECK_GATEWAY_MARKERS")
+        }
+        try:
+            for k in old:
+                os.environ.pop(k, None)
+            os.environ["http_proxy"] = proxy_url
+            status = lc.check_one("http://unlisted.example.invalid/x", 5, 0, {200})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("code"), 403)
+            self.assertNotEqual(status.get("text"), "unchecked")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            proxy.shutdown()
+            proxy.server_close()
+
+    def test_gateway_markers_env_extension(self):
+        # LINK_CHECK_GATEWAY_MARKERS declares the local gateway's signature
+        # without code changes: a markerless 403 plus an env marker is a
+        # refusal; without the env var the same 403 stays an origin answer.
+        proxy, proxy_url = start_proxy(sign_refusals=False)
+        old = {
+            k: os.environ.get(k)
+            for k in ("http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY",
+                      "LINK_CHECK_GATEWAY_MARKERS")
+        }
+        try:
+            for k in old:
+                os.environ.pop(k, None)
+            os.environ["http_proxy"] = proxy_url
+            os.environ["LINK_CHECK_GATEWAY_MARKERS"] = "x-origin-error"
+            status = lc.check_one("http://unlisted.example.invalid/x", 5, 0, {200})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("text"), "unchecked")
+            os.environ.pop("LINK_CHECK_GATEWAY_MARKERS")
+            status = lc.check_one("http://unlisted.example.invalid/x", 5, 0, {200})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("code"), 403)
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            proxy.shutdown()
+            proxy.server_close()
+
+    def test_http_egress_refusal_not_in_errors_count(self):
+        proxy, proxy_url = start_proxy(sign_refusals=True)
+        old = {
+            k: os.environ.get(k)
+            for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                      "no_proxy", "NO_PROXY", "LINK_CHECK_GATEWAY_MARKERS")
+        }
+        try:
+            for k in old:
+                os.environ.pop(k, None)
+            os.environ["http_proxy"] = proxy_url
+            pairs = [("f.md", "http://unlisted.example.invalid/x")]
+            total, errors, unchecked, error_map = lc.check_all(
+                pairs,
+                timeout=5,
+                max_retries=0,
+                max_concurrency=1,
+                accept={200, 403},
+                exclude_res=[],
+                exclude_private=False,
+            )
+            self.assertEqual(total, 1)
+            self.assertEqual(errors, 0)
+            self.assertEqual(unchecked, 1)
+            self.assertEqual(error_map["f.md"][0]["status"]["text"], "unchecked")
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            proxy.shutdown()
+            proxy.server_close()
+
+    def test_proxy_for_url_scheme_and_no_proxy_resolution(self):
+        old = {
+            k: os.environ.get(k)
+            for k in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                      "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY")
+        }
+        try:
+            for k in old:
+                os.environ.pop(k, None)
+            os.environ["http_proxy"] = "http://127.0.0.1:9"
+            self.assertTrue(lc._proxy_for_url("http://example.com/x"))
+            self.assertFalse(lc._proxy_for_url("https://example.com/x"))
+            os.environ.pop("http_proxy")
+            os.environ["HTTPS_PROXY"] = "http://127.0.0.1:9"
+            self.assertTrue(lc._proxy_for_url("https://example.com/x"))
+            self.assertFalse(lc._proxy_for_url("http://example.com/x"))
+            os.environ.pop("HTTPS_PROXY")
+            os.environ["all_proxy"] = "http://127.0.0.1:9"
+            self.assertTrue(lc._proxy_for_url("http://example.com/x"))
+            self.assertTrue(lc._proxy_for_url("https://example.com/x"))
+            # no_proxy bypasses matching hosts (suffix match, like urllib).
+            os.environ["no_proxy"] = "example.com, other.test"
+            self.assertFalse(lc._proxy_for_url("http://example.com/x"))
+            self.assertFalse(lc._proxy_for_url("http://sub.example.com/x"))
+            self.assertTrue(lc._proxy_for_url("http://elsewhere.com/x"))
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
 
 class TomlSubsetTests(unittest.TestCase):

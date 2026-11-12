@@ -11,7 +11,8 @@
 ### Link checker
 - Default: `LINK_CHECKER=python` — the stdlib `scripts/link-check.py` (Python 3.8+, no extra install; the program runs on a basic agent image).
 - Opt-in fallback: `LINK_CHECKER=lychee` (lychee >= 0.23.0 must be on PATH).
-- Egress-proxy refusals are reported as `unchecked` (not broken): no issue is opened or auto-closed for them; the run summary and dashboard show the unchecked count and top hosts. Widen the egress allowlist to convert them into real results.
+- Egress-proxy refusals are reported as `unchecked` (not broken): no issue is opened or auto-closed for them; the run summary and dashboard show the unchecked count and top hosts. Widen the egress allowlist to convert them into real results. This covers both `https://` (CONNECT-tunnel refusals) and plain `http://` links (a gateway 403 carrying a known gateway signature — squid-style headers, ACL-denial body text; extend via `LINK_CHECK_GATEWAY_MARKERS`, comma-separated substrings matched against the response headers and body).
+- Under `--exclude-all-private`, a public URL that redirects to a private host is excluded (lychee parity), never reported broken.
 - Shadow mode: set `LINK_HEALTH_SHADOW_OUT=<path>` to run a checker side-by-side and write only a side report — it forces dry-run, so the production baseline and issues are never touched.
 
 ### Scope
