@@ -190,7 +190,8 @@ sha_ok=$(SKILL_SOURCE_REPO="rossoctl/repoman" resolve_skill_meta "$dir6" "$SKILL
   || { echo "FAIL branch6: matching-source meta should be read back, got [$sha_ok]"; fail=1; }
 
 # =============================================================================
-# Branch 7: gh failure CLASSES are distinguishable (repoman#24 review nit) --
+# Branch 7: gh failure CLASSES are distinguishable (repoman#24 review nit:
+# https://github.com/rossoctl/repoman/pull/24) --
 # resolve_skill_meta captures gh's exit code and stderr instead of discarding
 # them with 2>/dev/null. An HTTP 401/403/404 that is not a rate limit is an
 # auth/permission failure and must say so (retrying will not help); anything

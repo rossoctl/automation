@@ -45,6 +45,15 @@ This applies to:
 - Commit message trailers referenced in PR descriptions
 - Any auto-generated changelogs or release notes
 
+## Cross-Repo References
+
+When a commit, PR description, test, or doc cites an issue or PR from *another*
+repo (e.g. repoman while working in automation), use the full URL
+(`https://github.com/rossoctl/repoman/pull/24`), not a bare `repoman#24`.
+GitHub only auto-links bare `#N` refs inside their own repo; the full URL stays
+traceable in commit messages, specs, vendored copies, and anywhere else the
+text lands.
+
 ## Error-Handling Policy (Engine Scripts)
 
 Engine scripts must not silently swallow exit codes behind `2>/dev/null`.
