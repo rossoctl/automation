@@ -130,8 +130,10 @@ class _ProxyHandler(socketserver.StreamRequestHandler):
 
     For plain-http URLs urllib sends absolute-URI requests (no CONNECT
     tunnel); those refusals carry the gateway's signature (marker header
-    and body) when the server's ``sign_refusals`` flag is set, and a bare
-    403 when it is not — an origin-shaped answer relayed by the proxy.
+    and body) when the server's ``sign_refusals`` flag is set, a bare
+    403 when it is not — an origin-shaped answer relayed by the proxy —
+    and a CDN-style origin 403 (plain "Access Denied" body, no gateway
+    signature) when ``cdn_denied`` is set.
     """
 
     def handle(self):
@@ -158,6 +160,17 @@ class _ProxyHandler(socketserver.StreamRequestHandler):
             )
             if method != "HEAD":
                 self.wfile.write(body)
+        elif getattr(self.server, "cdn_denied", False):
+            # CDN origin 403 (e.g. Akamai's standard denial body) relayed
+            # unchanged by the proxy: no gateway signature anywhere.
+            body = b"<html><head><title>Access Denied</title></head></html>\n"
+            self.wfile.write(
+                b"HTTP/1.1 403 Forbidden\r\n"
+                b"Content-Type: text/html\r\n"
+                b"Content-Length: %d\r\n\r\n" % len(body)
+            )
+            if method != "HEAD":
+                self.wfile.write(body)
         else:
             # Origin-shaped 403 (no gateway signature): a neutral header so
             # tests can opt it in as a refusal via LINK_CHECK_GATEWAY_MARKERS.
@@ -168,9 +181,10 @@ class _ProxyHandler(socketserver.StreamRequestHandler):
             )
 
 
-def start_proxy(sign_refusals=True):
+def start_proxy(sign_refusals=True, cdn_denied=False):
     proxy = _Proxy403(("127.0.0.1", 0), _ProxyHandler)
     proxy.sign_refusals = sign_refusals
+    proxy.cdn_denied = cdn_denied
     t = threading.Thread(target=proxy.serve_forever, daemon=True)
     t.start()
     port = proxy.server_address[1]
@@ -642,6 +656,42 @@ class EgressRefusalTests(unittest.TestCase):
             status = lc.check_one("http://unlisted.example.invalid/x", 5, 0, {200})
             self.assertIsNotNone(status)
             self.assertEqual(status.get("code"), 403)
+        finally:
+            for k, v in old.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            proxy.shutdown()
+            proxy.server_close()
+
+    def test_http_proxy_403_cdn_access_denied_stays_broken(self):
+        # A CDN origin 403 whose body plainly says "Access Denied" (Akamai's
+        # standard denial body) carries no gateway signature: relayed through
+        # a proxy it must stay a real (broken) result, not degrade to
+        # unchecked. Guards the gateway-specific GATEWAY_403_MARKERS defaults
+        # against re-widening to that broad phrase. The phrase stays opt-in:
+        # declaring it via LINK_CHECK_GATEWAY_MARKERS classifies the same
+        # 403 as a refusal.
+        proxy, proxy_url = start_proxy(sign_refusals=False, cdn_denied=True)
+        old = {
+            k: os.environ.get(k)
+            for k in ("http_proxy", "HTTP_PROXY", "no_proxy", "NO_PROXY",
+                      "LINK_CHECK_GATEWAY_MARKERS")
+        }
+        try:
+            for k in old:
+                os.environ.pop(k, None)
+            os.environ["http_proxy"] = proxy_url
+            status = lc.check_one("http://allowlisted.example.invalid/x", 5, 0, {200})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("code"), 403)
+            self.assertNotEqual(status.get("text"), "unchecked")
+            os.environ["LINK_CHECK_GATEWAY_MARKERS"] = "access denied"
+            status = lc.check_one("http://allowlisted.example.invalid/x", 5, 0, {200})
+            self.assertIsNotNone(status)
+            self.assertEqual(status.get("text"), "unchecked")
+            self.assertIsNone(status.get("code"))
         finally:
             for k, v in old.items():
                 if v is None:

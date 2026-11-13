@@ -600,16 +600,17 @@ def _is_egress_refusal(exc: BaseException) -> bool:
 # "Tunnel connection failed: …" text (matched by _is_egress_refusal). For
 # http:// URLs urllib sends an absolute-URI request to the proxy instead,
 # so a refusal arrives as an ordinary 403 and only these markers
-# distinguish it from an origin 403. Deployments whose gateway signs
+# distinguish it from an origin 403. Only gateway-specific signatures are
+# defaults: broader phrases (e.g. a plain "access denied" body, which CDN
+# origin 403 pages also serve, or "egress") would mask a relayed origin
+# 403 on an allowlisted host as unchecked. Deployments whose gateway signs
 # refusals differently can extend the list without code changes via
 # LINK_CHECK_GATEWAY_MARKERS (comma-separated substrings).
 GATEWAY_403_MARKERS = (
     "x-squid-error",  # squid ACL-denial header
-    "access denied",  # common ACL-denial header/body text
     "blocked by",     # "blocked by your network/organization/policy"
     "not allowlisted",
     "not in allowlist",
-    "egress",
 )
 
 
@@ -676,6 +677,8 @@ def _egress_refusal_403(
         return None
     haystack = str(exc.headers or "").lower()
     try:
+        # The 4 KB body cap is intentional: gateway denial pages are well
+        # under it, and the header block above is already searched in full.
         body = exc.read(4096)
     except Exception:  # noqa: BLE001 — an unreadable body must not crash the scan
         body = b""
