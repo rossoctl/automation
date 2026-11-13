@@ -45,6 +45,24 @@ This applies to:
 - Commit message trailers referenced in PR descriptions
 - Any auto-generated changelogs or release notes
 
+## Cross-Repo References
+
+When a commit, PR description, test, or doc cites an issue or PR from *another*
+repo (e.g. repoman while working in automation), use the full URL
+(`https://github.com/rossoctl/repoman/pull/24`), not a bare `repoman#24`.
+GitHub only auto-links bare `#N` refs inside their own repo; the full URL stays
+traceable in commit messages, specs, vendored copies, and anywhere else the
+text lands.
+
+## Error-Handling Policy (Engine Scripts)
+
+Engine scripts must not silently swallow exit codes behind `2>/dev/null`.
+Capture the return code (and stderr, where the error class matters) and keep
+error classes distinguishable -- transient failures (network blip, secondary
+rate limit) vs. permanent ones (expired PAT, missing permission) -- so calling
+scripts can react instead of guessing: a caller that cannot tell the classes
+apart either spams retries at a permission error or skips work after a hiccup.
+
 ## Scope Discipline
 
 Only commit files directly related to the PR's stated purpose. Do not bundle

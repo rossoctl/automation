@@ -189,5 +189,55 @@ sha_ok=$(SKILL_SOURCE_REPO="rossoctl/repoman" resolve_skill_meta "$dir6" "$SKILL
 [ "$sha_ok" = "$FRESH_SHA" ] \
   || { echo "FAIL branch6: matching-source meta should be read back, got [$sha_ok]"; fail=1; }
 
+# =============================================================================
+# Branch 7: gh failure CLASSES are distinguishable (repoman#24 review nit:
+# https://github.com/rossoctl/repoman/pull/24) --
+# resolve_skill_meta captures gh's exit code and stderr instead of discarding
+# them with 2>/dev/null. An HTTP 401/403/404 that is not a rate limit is an
+# auth/permission failure and must say so (retrying will not help); anything
+# else, including a 403 rate limit, reads as transient and says it will retry.
+# =============================================================================
+dir7="$TEST_TMPDIR/case7"
+mkdir -p "$dir7"
+run7() {
+  SKILL_SOURCE_REPO="rossoctl/repoman" resolve_skill_meta "$dir7" "$SKILL" 2>&1
+}
+
+# --- 403 without a rate-limit marker: permission class, NOT transient ---
+gh() { echo "HTTP 403: Forbidden" >&2; return 1; }
+err=$(run7)
+case "$err" in
+  *"token likely lacks read access"*) ;;
+  *) echo "FAIL branch7: bare 403 should be classed auth/permission, got: [$err]"; fail=1 ;;
+esac
+case "$err" in
+  *"will retry next run"*) echo "FAIL branch7: bare 403 must NOT be classed transient, got: [$err]"; fail=1 ;;
+esac
+case "$err" in
+  *"HTTP 403: Forbidden"*) ;;
+  *) echo "FAIL branch7: gh's stderr should be surfaced (indented), got: [$err]"; fail=1 ;;
+esac
+
+# --- 403 WITH a rate-limit marker: transient class, will retry ---
+gh() { echo "HTTP 403: rate limit exceeded" >&2; return 1; }
+err=$(run7)
+case "$err" in
+  *"failed transiently"*"will retry next run"*) ;;
+  *) echo "FAIL branch7: 403 rate limit should be classed transient, got: [$err]"; fail=1 ;;
+esac
+
+# --- non-HTTP failure (network): transient class ---
+gh() { echo "gh: dial tcp: connection reset by peer" >&2; return 1; }
+err=$(run7)
+case "$err" in
+  *"failed transiently"*"will retry next run"*) ;;
+  *) echo "FAIL branch7: network error should be classed transient, got: [$err]"; fail=1 ;;
+esac
+
+# Every failure class still behaves like the old failure path: empty SHA,
+# no meta file written (the next run retries).
+[ ! -f "$dir7/$META" ] \
+  || { echo "FAIL branch7: $META must NOT be written on any failure class"; fail=1; }
+
 unset -f gh
 [ "$fail" -eq 0 ] && echo "PASS: skill-meta provenance+attribution" || exit 1
