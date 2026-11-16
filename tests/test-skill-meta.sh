@@ -190,8 +190,8 @@ sha_ok=$(SKILL_SOURCE_REPO="rossoctl/repoman" resolve_skill_meta "$dir6" "$SKILL
   || { echo "FAIL branch6: matching-source meta should be read back, got [$sha_ok]"; fail=1; }
 
 # =============================================================================
-# Branch 7: gh failure CLASSES are distinguishable (repoman#24 review nit:
-# https://github.com/rossoctl/repoman/pull/24) --
+# Branch 7: gh failure CLASSES are distinguishable
+# (https://github.com/rossoctl/repoman/pull/24 review nit) --
 # resolve_skill_meta captures gh's exit code and stderr instead of discarding
 # them with 2>/dev/null. An HTTP 401/403/404 that is not a rate limit is an
 # auth/permission failure and must say so (retrying will not help); anything
@@ -216,6 +216,24 @@ esac
 case "$err" in
   *"HTTP 403: Forbidden"*) ;;
   *) echo "FAIL branch7: gh's stderr should be surfaced (indented), got: [$err]"; fail=1 ;;
+esac
+
+# --- current gh wording, "gh: <message> (HTTP 403)": still permission class ---
+# gh 2.89 puts the status in parentheses after the API message
+# ("gh: You must have ... (HTTP 403)"), not "HTTP 403: ...". The same grep
+# matches it; pin that shape so a tighter regex cannot drop it silently.
+gh() { echo "gh: Resource not accessible by integration (HTTP 403)" >&2; return 1; }
+err=$(run7)
+case "$err" in
+  *"token likely lacks read access"*) ;;
+  *) echo "FAIL branch7: parenthetical HTTP 403 should be classed auth/permission, got: [$err]"; fail=1 ;;
+esac
+case "$err" in
+  *"will retry next run"*) echo "FAIL branch7: parenthetical HTTP 403 must NOT be classed transient, got: [$err]"; fail=1 ;;
+esac
+case "$err" in
+  *"gh: Resource not accessible by integration (HTTP 403)"*) ;;
+  *) echo "FAIL branch7: current gh stderr should be surfaced (indented), got: [$err]"; fail=1 ;;
 esac
 
 # --- 403 WITH a rate-limit marker: transient class, will retry ---

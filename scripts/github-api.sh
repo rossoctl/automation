@@ -311,6 +311,13 @@ resolve_skill_meta() {
     "repos/$SKILL_SOURCE_REPO/commits?path=skills/$skill_name&per_page=1" \
     --jq '.[0].sha' 2>"$gh_err_file") || gh_rc=$?
   if [ "$gh_rc" -ne 0 ]; then
+    # gh has no stable machine-readable error code yet (GH_ERROR_FORMAT=json
+    # is only a design: https://github.com/cli/cli/issues/14038), so the class
+    # is read from gh's human stderr. `HTTP 40[134]` matches both the older
+    # "HTTP 403: ..." lines and gh 2.89's "gh: <message> (HTTP 403)" lines;
+    # "rate limit" anywhere in the text keeps that 403 transient. Branch 7 of
+    # tests/test-skill-meta.sh pins both shapes, so a gh reword fails the
+    # test instead of silently flipping a permission failure to transient.
     if grep -qE 'HTTP 40[134]' "$gh_err_file" && ! grep -qi 'rate limit' "$gh_err_file"; then
       echo "WARN: provenance lookup for '$skill_name' was refused (gh exit $gh_rc; token likely lacks read access to $SKILL_SOURCE_REPO); using linkless attribution." >&2
     else
