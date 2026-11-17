@@ -1,0 +1,16 @@
+https://extract.example/autolink
+https://extract.example/bare
+https://extract.example/bare_(paren)
+https://extract.example/html-href
+https://extract.example/html-src
+https://extract.example/image.png
+https://extract.example/inline
+https://extract.example/list-item-prose
+https://extract.example/loose-list-continuation
+https://extract.example/nested-list
+https://extract.example/paragraph-continuation
+https://extract.example/paren-prose
+https://extract.example/paren-prose2
+https://extract.example/period_(paren)
+https://extract.example/shortcut-ref
+https://extract.example/wiki/Foo_(bar)

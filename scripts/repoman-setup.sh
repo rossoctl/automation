@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Pure writer/validator for the three ~/.repoman file kinds RepoMan reads.
 #
-# Subcommands: init-config, add-repo, enable-program, set-output. Each writes
+# Subcommands: init-config, add-repo, enable-program, set-output,
+# set-requirements. Each writes
 # exactly one thing, validates it, and persists atomically (temp file in the
 # target directory, then `mv` into place, so a crash mid-write never leaves a
 # half-written JSON file).
@@ -31,7 +32,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # user who introduces a new program must add its identifier here until the
 # program registry (_index.json, tracked in #76) replaces it with a
 # discovered list.
-KNOWN_PROGRAMS="link-health dep-bump pr-review automation-health repo-sync weekly-report"
+KNOWN_PROGRAMS="link-health dep-bump pr-review automation-health repo-sync weekly-report doc-drift"
 
 usage() {
   cat <<'EOF'
@@ -51,7 +52,7 @@ Subcommands:
   enable-program --program <name>
       Merge {"enabled": true} into programs/<name>.json.
       Known programs: link-health, dep-bump, pr-review, automation-health,
-      repo-sync, weekly-report.
+      repo-sync, weekly-report, doc-drift.
 
   set-output --program <name> --mode same|central [--repo <owner/name>]
       Merge {"output_repo": {...}} into programs/<name>.json.

@@ -50,7 +50,9 @@ printf '[{"owner":"alice","name":"a"}]\n' > "$REPOMAN_REPOS_FILE"
 REPORTS="$TEST_TMPDIR/reports/link-health"; mkdir -p "$REPORTS"
 
 # --- run 1: dry run ---
-REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" bash "$SCANNER" --dry-run >/dev/null 2>&1
+# Pinned to LINK_CHECKER=lychee: this test drives the lychee stub (the
+# default checker is python).
+REPORTS_DIR="$REPORTS" LINK_CHECKER=lychee PATH="$BIN:$PATH" bash "$SCANNER" --dry-run >/dev/null 2>&1
 
 # run 1 must not have written the baseline
 [ ! -f "$REPORTS/latest.json" ] \
@@ -62,7 +64,7 @@ REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" bash "$SCANNER" --dry-run >/dev/null 2>
 
 # --- run 2: real run ---
 : > "$CREATE_LOG"
-REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
+REPORTS_DIR="$REPORTS" LINK_CHECKER=lychee PATH="$BIN:$PATH" bash "$SCANNER" >/dev/null 2>&1
 
 # run 2 must file exactly one issue (the link is still "new" — dry run left no baseline)
 created=$(grep -c "CREATE" "$CREATE_LOG" 2>/dev/null || echo 0)

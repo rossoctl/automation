@@ -72,7 +72,9 @@ printf '[{"scan_id":"prev-1","fixed":0}]\n' > "$REPORTS/history.json"
 # Subset run: scan ONLY alice/a. The orchestrator would set both envs; emulate.
 SUBSET="$TEST_TMPDIR/subset.json"
 printf '[{"owner":"alice","name":"a"}]\n' > "$SUBSET"
-REPORTS_DIR="$REPORTS" PATH="$BIN:$PATH" \
+# Pinned to LINK_CHECKER=lychee: this test drives the lychee stub (the
+# default checker is python).
+REPORTS_DIR="$REPORTS" LINK_CHECKER=lychee PATH="$BIN:$PATH" \
   REPOMAN_REPOS_FILE="$SUBSET" REPOMAN_SUBSET_REPOS="alice/a" \
   bash "$SCANNER" >/dev/null 2>&1
 
