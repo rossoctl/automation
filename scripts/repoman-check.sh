@@ -254,7 +254,8 @@ check_labels() {
   # 5xx) gh_with_backoff returns 1 with empty stdout, and an unchecked capture
   # would report every required label as missing on this repo. Skip the repo's
   # label check instead, so one unreachable repo is one finding, not N false gaps.
-  if ! existing=$(gh_with_backoff label list --repo "$repo" --json name --jq '.[].name'); then
+  # --paginate follows every labels API page, avoiding gh label list's 1,000-result ceiling.
+  if ! existing=$(gh_with_backoff api --paginate "repos/$repo/labels" --jq '.[].name'); then
     add_finding "LABEL WARN: could not list labels on $repo (see stderr above); skipping its label check rather than reporting every required label as missing."
     return
   fi
