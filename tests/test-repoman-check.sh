@@ -24,11 +24,11 @@ cat > "$STUB_DIR/gh" <<STUB
 #!/usr/bin/env bash
 # Scripted gh stub. Reads GH_STUB_* env to decide responses.
 # Recognizes:  api -i user  |  api -i repos/.../labels  |  api repos/<repo> (visibility)
+#              |  api --paginate repos/.../labels?per_page=100
 #              |  label list --json name --jq ...  |  label create ...
-# NOTE: 'label list' is matched ONLY in its --json name form, which is how the
-# checker calls it. Real 'gh label list' without --json prints a TSV table
-# (name<TAB>desc<TAB>color), NOT bare names; modelling only the --json form keeps
-# this test honest — a checker that parsed the bare table would fail here.
+# NOTE: The checker fetches labels through the paginated REST API and requests
+# bare names with --jq. The legacy label-list branches remain to catch accidental
+# regressions to the CLI's different output and pagination behavior.
 case "\$*" in
   *"-i user"*)
     # GH_STUB_USER_FAILS=1 simulates a transport/auth failure (not rate-limit),
@@ -55,6 +55,15 @@ case "\$*" in
     printf 'X-Accepted-OAuth-Scopes: %s\r\n' "\${GH_STUB_ACCEPTED-repo}"
     printf '\r\n[]\n'
     exit 0 ;;
+  *"api --paginate repos/"*"/labels?per_page=100"*)
+    # Model gh api --paginate by returning every label, including labels beyond 1,000.
+    if [ "\${GH_STUB_LIST_FAILS-0}" = "1" ]; then
+      echo "could not resolve repository" >&2; exit 1
+    fi
+    for lbl in \${GH_STUB_LABELS-}; do
+      printf '%s\\n' "\$lbl"
+    done
+    exit 0 ;;
   *"api repos/"*)
     # Visibility lookup: 'gh api repos/<owner>/<name> --jq .private'
     v=\$(cat "$VIS_COUNT_FILE"); v=\$((v + 1)); echo "\$v" > "$VIS_COUNT_FILE"
@@ -71,8 +80,17 @@ case "\$*" in
     if [ "\${GH_STUB_LIST_FAILS-0}" = "1" ]; then
       echo "could not resolve repository" >&2; exit 1
     fi
-    # The checker asks for bare names one per line via --json name --jq '.[].name'.
-    printf '%s\n' "\${GH_STUB_LABELS-}"
+    # Match gh label list's default 30-item page unless --limit is explicit.
+    # GH_STUB_LABELS is a whitespace-separated list of label names.
+    limit=30
+    case " \$* " in
+      *" --limit "*) limit=1000 ;;
+    esac
+    count=0
+    for lbl in \${GH_STUB_LABELS-}; do
+      count=\$((count + 1))
+      [ "\$count" -le "\$limit" ] && printf '%s\\n' "\$lbl"
+    done
     exit 0 ;;
   *"label list"*)
     # Bare 'label list' (no --json): emit a realistic TSV table so any consumer
@@ -264,4 +282,26 @@ out=$(GH_STUB_SCOPES="repo" GH_STUB_LABELS="" GH_STUB_ACCEPTED="repo" GH_STUB_PR
 [ "$rc" -eq 0 ] || { echo "FAIL private-repo label warning should not hard-fail: rc=$rc out=[$out]"; fail=1; }
 case "$out" in *"alice/secret"*) ;; *) echo "FAIL private-repo case should mention alice/secret, got: [$out]"; fail=1 ;; esac
 
+
+# --- pagination regression: a required label beyond 1,000 labels must still
+# be found. The stub returns all labels for the --paginate API request. ---
+labels=""
+i=1
+while [ "$i" -le 1004 ]; do
+  labels="${labels}existing-label-$i "
+  i=$((i + 1))
+done
+labels="${labels}ready-for-ai-review"
+echo '[{"owner":"alice","name":"tool"}]' > "$REPOS_FILE"
+echo '{"pat_scopes":["repo"],"labels_required":["ready-for-ai-review"]}' > "$PROGRAMS_DIR/pr-review.json"
+out=$(GH_STUB_SCOPES="repo" GH_STUB_LABELS="$labels" run_check --program pr-review); rc=$?
+[ "$rc" -eq 0 ] || { echo "FAIL label beyond default page should exit 0: rc=$rc out=[$out]"; fail=1; }
+case "$out" in
+  *"'ready-for-ai-review' missing"*)
+    echo "FAIL required label beyond first 30 was not found: [$out]"; fail=1 ;;
+esac
+case "$out" in
+  *"could not list labels"*)
+    echo "FAIL the paginated label call was not recognised: [$out]"; fail=1 ;;
+esac
 [ "$fail" -eq 0 ] && echo "PASS: repoman-check.sh" || exit 1
