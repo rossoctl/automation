@@ -248,14 +248,14 @@ check_labels() {
   local repo="$1" required="$2" create_flag="$3"
   local existing label accepted
 
-  # `gh label list` prints a TSV table (name<TAB>description<TAB>color); ask for
-  # bare names one per line so the whole-line match below is correct.
+  # Ask the labels API for bare names, one per line, so the whole-line match
+  # below is correct. --paginate follows every page; per_page=100 reduces the
+  # number of requests without imposing a total-result limit.
   # Guard the call: on failure (repo renamed/deleted, permissions, transient
   # 5xx) gh_with_backoff returns 1 with empty stdout, and an unchecked capture
   # would report every required label as missing on this repo. Skip the repo's
   # label check instead, so one unreachable repo is one finding, not N false gaps.
-  # --paginate follows every labels API page, avoiding gh label list's 1,000-result ceiling.
-  if ! existing=$(gh_with_backoff api --paginate "repos/$repo/labels" --jq '.[].name'); then
+  if ! existing=$(gh_with_backoff api --paginate "repos/$repo/labels?per_page=100" --jq '.[].name'); then
     add_finding "LABEL WARN: could not list labels on $repo (see stderr above); skipping its label check rather than reporting every required label as missing."
     return
   fi

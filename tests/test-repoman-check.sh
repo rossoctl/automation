@@ -25,10 +25,9 @@ cat > "$STUB_DIR/gh" <<STUB
 # Scripted gh stub. Reads GH_STUB_* env to decide responses.
 # Recognizes:  api -i user  |  api -i repos/.../labels  |  api repos/<repo> (visibility)
 #              |  label list --json name --jq ...  |  label create ...
-# NOTE: 'label list' is matched ONLY in its --json name form, which is how the
-# checker calls it. Real 'gh label list' without --json prints a TSV table
-# (name<TAB>desc<TAB>color), NOT bare names; modelling only the --json form keeps
-# this test honest — a checker that parsed the bare table would fail here.
+# NOTE: The checker fetches labels through the paginated REST API and requests
+# bare names with --jq. The legacy label-list branches remain to catch accidental
+# regressions to the CLI's different output and pagination behavior.
 case "\$*" in
   *"-i user"*)
     # GH_STUB_USER_FAILS=1 simulates a transport/auth failure (not rate-limit),
@@ -55,7 +54,7 @@ case "\$*" in
     printf 'X-Accepted-OAuth-Scopes: %s\r\n' "\${GH_STUB_ACCEPTED-repo}"
     printf '\r\n[]\n'
     exit 0 ;;
-  *"api --paginate repos/"*"/labels"*)
+  *"api --paginate repos/"*"/labels?per_page=100"*)
     # Model gh api --paginate by returning every label, including labels beyond 1,000.
     if [ "\${GH_STUB_LIST_FAILS-0}" = "1" ]; then
       echo "could not resolve repository" >&2; exit 1
