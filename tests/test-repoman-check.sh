@@ -24,6 +24,7 @@ cat > "$STUB_DIR/gh" <<STUB
 #!/usr/bin/env bash
 # Scripted gh stub. Reads GH_STUB_* env to decide responses.
 # Recognizes:  api -i user  |  api -i repos/.../labels  |  api repos/<repo> (visibility)
+#              |  api --paginate repos/.../labels?per_page=100
 #              |  label list --json name --jq ...  |  label create ...
 # NOTE: The checker fetches labels through the paginated REST API and requests
 # bare names with --jq. The legacy label-list branches remain to catch accidental
@@ -298,5 +299,9 @@ out=$(GH_STUB_SCOPES="repo" GH_STUB_LABELS="$labels" run_check --program pr-revi
 case "$out" in
   *"'ready-for-ai-review' missing"*)
     echo "FAIL required label beyond first 30 was not found: [$out]"; fail=1 ;;
+esac
+case "$out" in
+  *"could not list labels"*)
+    echo "FAIL the paginated label call was not recognised: [$out]"; fail=1 ;;
 esac
 [ "$fail" -eq 0 ] && echo "PASS: repoman-check.sh" || exit 1
